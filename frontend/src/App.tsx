@@ -7,6 +7,7 @@ import { HRProfileView } from './components/HRProfileView'
 import { JSONInspector } from './components/JSONInspector'
 import { TraceInspector } from './components/TraceInspector'
 import { CVListItem, CVDetail, ChatMessage, KeepaliveStatus, Citation } from './types'
+import { apiService } from './services/api'
 import { UserCheck, Code2, Activity, UploadCloud, X, Zap } from 'lucide-react'
 
 export function App() {
@@ -22,53 +23,44 @@ export function App() {
   const [loadingKeepalive, setLoadingKeepalive] = useState(false)
   const [loadingCvs, setLoadingCvs] = useState(false)
 
-  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-
   // Fetch Keepalive
   const fetchKeepalive = useCallback(async () => {
     try {
       setLoadingKeepalive(true)
-      const res = await fetch(`${apiBase}/api/v1/keepalive`)
-      if (!res.ok) throw new Error(`HTTP error ${res.status}`)
-      const data = await res.json()
+      const data = await apiService.getKeepalive()
       setKeepalive(data)
     } catch {
       setKeepalive(null)
     } finally {
       setLoadingKeepalive(false)
     }
-  }, [apiBase])
+  }, [])
 
   // Fetch CV List
   const fetchCvs = useCallback(async () => {
     try {
       setLoadingCvs(true)
-      const res = await fetch(`${apiBase}/api/v1/cvs`)
-      if (!res.ok) throw new Error(`HTTP error ${res.status}`)
-      const data = await res.json()
+      const data = await apiService.getCVList()
       setCvs(data)
-      // Auto-select first doc if none selected
       if (!selectedDocId && data.length > 0) {
         setSelectedDocId(data[0].id)
       }
     } catch {
-      // Ignored if offline
+      // Offline fallback
     } finally {
       setLoadingCvs(false)
     }
-  }, [apiBase, selectedDocId])
+  }, [selectedDocId])
 
   // Fetch Single CV Detail
   const fetchCvDetail = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`${apiBase}/api/v1/cvs/${id}`)
-      if (!res.ok) throw new Error(`HTTP error ${res.status}`)
-      const data: CVDetail = await res.json()
+      const data = await apiService.getCVDetail(id)
       setSelectedDoc(data)
     } catch {
       setSelectedDoc(null)
     }
-  }, [apiBase])
+  }, [])
 
   useEffect(() => {
     fetchKeepalive()
@@ -85,28 +77,16 @@ export function App() {
     }
   }, [selectedDocId, fetchCvDetail])
 
-  // Handle Multi-file Upload
+  // Multi-file Upload Handler
   const handleUpload = async (files: File[]) => {
     setIsUploading(true)
     try {
       for (const file of files) {
-        const formData = new FormData()
-        formData.append('file', file)
-
-        const res = await fetch(`${apiBase}/api/v1/cvs/upload`, {
-          method: 'POST',
-          body: formData,
-        })
-
-        if (!res.ok) {
-          const errJson = await res.json()
-          throw new Error(errJson.detail || `Upload failed for ${file.name}`)
+        const result = await apiService.uploadCV(file)
+        if (result && result.document_id) {
+          setSelectedDocId(result.document_id)
         }
-
-        const data = await res.json()
-        setSelectedDocId(data.document_id)
       }
-
       await fetchCvs()
       setShowUploadModal(false)
     } finally {
@@ -114,12 +94,12 @@ export function App() {
     }
   }
 
-  // Handle Delete CV
+  // Delete CV Handler
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!window.confirm('Delete this CV and all its indexed embeddings?')) return
     try {
-      await fetch(`${apiBase}/api/v1/cvs/${id}`, { method: 'DELETE' })
+      await apiService.deleteCV(id)
       if (selectedDocId === id) {
         setSelectedDocId(null)
         setSelectedDoc(null)
@@ -130,7 +110,7 @@ export function App() {
     }
   }
 
-  // Handle SSE Chat
+  // SSE Chat Stream Handler
   const handleSendMessage = async (query: string) => {
     if (!query.trim() || isStreaming) return
 
@@ -156,117 +136,66 @@ export function App() {
     setMessages((prev) => [...prev, userMsg, assistantMsg])
     setIsStreaming(true)
 
-    try {
-      const response = await fetch(`${apiBase}/api/v1/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query,
-          document_id: selectedDocId || undefined,
-          top_k: 4,
-          chat_history: messages.map((m) => ({ role: m.role, content: m.content })),
-        }),
-      })
+    let accumulatedContent = ''
+    let accumulatedCitations: Citation[] = []
 
-      if (!response.ok || !response.body) {
-        throw new Error(`Chat request failed with status ${response.status}`)
-      }
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let fullContent = ''
-      let streamCitations: Citation[] = []
-
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n\n')
-        buffer = lines.pop() || ''
-
-        for (const block of lines) {
-          if (!block.trim()) continue
-          const blockLines = block.split('\n')
-          let eventType = 'message'
-          let eventData = ''
-
-          for (const line of blockLines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.replace('event: ', '').trim()
-            } else if (line.startsWith('data: ')) {
-              eventData = line.replace('data: ', '').trim()
-            }
-          }
-
-          if (eventType === 'citations' && eventData) {
-            try {
-              const parsed = JSON.parse(eventData)
-              streamCitations = parsed.citations || []
-            } catch {}
-          } else if (eventType === 'token' && eventData) {
-            try {
-              const parsed = JSON.parse(eventData)
-              fullContent += parsed.token || ''
-            } catch {}
-          }
-
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === assistantMessageId
-                ? {
-                    ...msg,
-                    content: fullContent,
-                    citations: streamCitations,
-                    isStreaming: true,
-                  }
-                : msg
-            )
+    await apiService.streamChat(query, selectedDocId, messages, {
+      onCitations: (citations) => {
+        accumulatedCitations = citations
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMessageId ? { ...m, citations: accumulatedCitations } : m
           )
-        }
-      }
-
-      // Finalize
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMessageId
-            ? {
-                ...msg,
-                content: fullContent || 'Unable to generate response from context.',
-                citations: streamCitations,
-                isStreaming: false,
-              }
-            : msg
         )
-      )
-    } catch (err: any) {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMessageId
-            ? {
-                ...msg,
-                content: `Error: ${err.message || 'Failed to stream response.'}`,
-                isStreaming: false,
-              }
-            : msg
+      },
+      onToken: (token) => {
+        accumulatedContent += token
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMessageId ? { ...m, content: accumulatedContent } : m
+          )
         )
-      )
-    } finally {
-      setIsStreaming(false)
-    }
+      },
+      onDone: () => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMessageId
+              ? {
+                  ...m,
+                  content: accumulatedContent || 'No relevant context found in candidate CVs.',
+                  isStreaming: false,
+                }
+              : m
+          )
+        )
+        setIsStreaming(false)
+      },
+      onError: (err) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMessageId
+              ? {
+                  ...m,
+                  content: `Error: ${err.message || 'Stream disconnected'}`,
+                  isStreaming: false,
+                }
+              : m
+          )
+        )
+        setIsStreaming(false)
+      },
+    })
   }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 selection:bg-emerald-500 selection:text-white">
-      {/* Top Header */}
+      {/* Top Navigation Header */}
       <Header keepalive={keepalive} loading={loadingKeepalive} onPing={fetchKeepalive} />
 
-      {/* Main Workspace 3-Pane Layout */}
+      {/* Main Workspace 3-Pane Responsive Layout */}
       <main className="flex-1 p-4 grid grid-cols-1 md:grid-cols-12 gap-4 max-w-[1680px] w-full mx-auto">
-        {/* Pane 1: Left CV List & Ingestion (Cols 1-3) */}
+        {/* Pane 1: Left CV List & Ingestion Action (Cols 1-3) */}
         <div className="md:col-span-3 flex flex-col space-y-3">
-          {/* Ingestion Trigger Action */}
           <button
             onClick={() => setShowUploadModal(true)}
             className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 transition-all font-mono"
@@ -294,7 +223,7 @@ export function App() {
           />
         </div>
 
-        {/* Pane 3: Right Inspector Panels: HR View, JSON Inspector, SLA Traces (Cols 9-12) */}
+        {/* Pane 3: Right Inspector: HR Profile, JSON Viewer, SLA Traces (Cols 9-12) */}
         <div className="md:col-span-4 flex flex-col glass-panel rounded-2xl border border-slate-800 overflow-hidden h-[calc(100vh-6.5rem)]">
           {/* Tab Navigation */}
           <div className="p-2 border-b border-slate-800 bg-slate-900/60 flex items-center space-x-1 text-xs font-mono">
@@ -335,7 +264,7 @@ export function App() {
             </button>
           </div>
 
-          {/* Tab Content */}
+          {/* Tab Content Body */}
           <div className="flex-1 overflow-y-auto p-4">
             {!selectedDoc ? (
               <div className="h-full flex flex-col items-center justify-center text-center text-xs text-slate-500 p-6 space-y-2">

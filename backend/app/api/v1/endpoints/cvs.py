@@ -1,4 +1,4 @@
-"""CV Ingestion, Parsing, and Management API Endpoints."""
+"""CV Ingestion, Parsing, Extraction, and Management API Endpoints."""
 import logging
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
@@ -11,23 +11,36 @@ from backend.app.models.cv_document import CVDocument
 from backend.app.models.cv_chunk import CVChunk
 from backend.app.observability.tracer import PipelineTracer
 from backend.app.services.parser import extract_text_from_pdf
-from backend.app.services.chunker import chunk_cv_text
+from backend.app.services.chunker import chunk_cv_text, TextChunk
+from backend.app.services.llm_extractor import LLMExtractor
+from backend.app.services.merger import merge_extracted_chunks
+from backend.app.services.pipeline import execute_cv_pipeline
+from backend.app.schemas.cv_schema import CVExtractionSchema
 
 logger = logging.getLogger("cv_rag_pipeline.api.cvs")
 
 router = APIRouter()
 
 
+# =============================================================================
+# Request & Response DTO Models
+# =============================================================================
+
 class CVUploadResponse(BaseModel):
-    document_id: str
-    filename: str
-    file_size: int
-    status: str
-    chunks_count: int
-    total_duration_ms: float
-    within_sla: bool
-    sla_target_ms: float
-    stages: Dict[str, Any]
+    document_id: str = Field(..., description="Unique document UUID")
+    filename: str = Field(..., description="Uploaded filename")
+    file_size: int = Field(..., description="File size in bytes")
+    status: str = Field(..., description="Current processing status")
+    chunks_count: int = Field(..., description="Number of text chunks created")
+    total_duration_ms: float = Field(..., description="Total pipeline processing duration in milliseconds")
+    within_sla: bool = Field(..., description="Whether total duration satisfies <= 5000ms SLA")
+    sla_target_ms: float = Field(..., description="Target SLA threshold (5000.0ms)")
+    stages: Dict[str, Any] = Field(default_factory=dict, description="Per-stage timing breakdown")
+
+
+class ExtractRequest(BaseModel):
+    document_id: str = Field(..., description="Document ID to extract")
+    chunks: Optional[List[Dict[str, Any]]] = Field(None, description="Optional custom chunk list")
 
 
 class CVListItem(BaseModel):
@@ -36,9 +49,9 @@ class CVListItem(BaseModel):
     file_size: int
     content_type: str
     status: str
-    total_duration_ms: Optional[float]
-    created_at: Optional[str]
-    updated_at: Optional[str]
+    total_duration_ms: Optional[float] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class CVDetailResponse(BaseModel):
@@ -47,43 +60,45 @@ class CVDetailResponse(BaseModel):
     file_size: int
     content_type: str
     status: str
-    error_message: Optional[str]
-    total_duration_ms: Optional[float]
-    raw_text: Optional[str]
-    parsed_json: Optional[Any]
-    chunks: List[Dict[str, Any]]
-    traces: List[Dict[str, Any]]
-    created_at: Optional[str]
-    updated_at: Optional[str]
+    error_message: Optional[str] = None
+    total_duration_ms: Optional[float] = None
+    raw_text: Optional[str] = None
+    parsed_json: Optional[Any] = None
+    chunks: List[Dict[str, Any]] = Field(default_factory=list)
+    traces: List[Dict[str, Any]] = Field(default_factory=list)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
-from backend.app.services.pipeline import execute_cv_pipeline
+# =============================================================================
+# Route Handlers
+# =============================================================================
 
 @router.post(
     "/upload",
     response_model=CVUploadResponse,
-    summary="Upload & Process CV PDF",
+    summary="Upload & Process CV",
     description="Upload a CV PDF to execute the full 8-stage pipeline: extraction, chunking, LLM extraction, validation, merge, embeddings, vector upsert, and rag_ready verification."
 )
 async def upload_cv(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
-    if not file.filename.lower().endswith(".pdf"):
+    if not file.filename or not file.filename.lower().endswith((".pdf", ".docx")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF files are supported for CV ingestion."
+            detail="Only PDF and DOCX files are supported for CV ingestion."
         )
 
-    pdf_bytes = await file.read()
-    file_size = len(pdf_bytes)
+    file_bytes = await file.read()
+    file_size = len(file_bytes)
     if file_size == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file is empty."
         )
 
-    # Initialize CVDocument record
+    # Initialize CVDocument record in database
     doc = CVDocument(
         filename=file.filename,
         file_size=file_size,
@@ -99,7 +114,7 @@ async def upload_cv(
     try:
         # Execute all 8 stages sequentially under 5.0s SLA
         updated_doc, summary = await execute_cv_pipeline(
-            pdf_bytes=pdf_bytes,
+            pdf_bytes=file_bytes,
             filename=file.filename,
             doc=doc,
             db=db,
@@ -127,15 +142,6 @@ async def upload_cv(
             detail=f"CV processing pipeline failed: {str(e)}"
         )
 
-from pydantic import BaseModel, Field
-from backend.app.schemas.cv_schema import CVExtractionSchema
-from backend.app.services.llm_extractor import LLMExtractor
-from backend.app.services.merger import merge_extracted_chunks
-from backend.app.services.chunker import TextChunk
-
-class ExtractRequest(BaseModel):
-    document_id: str
-    chunks: Optional[List[Dict[str, Any]]] = None
 
 @router.post(
     "/extract",
@@ -155,7 +161,6 @@ async def extract_cv_json(
 
     extractor = LLMExtractor()
     try:
-        # If chunks provided in body, use them, otherwise use stored chunks
         if request.chunks:
             text_chunks = [
                 TextChunk(
