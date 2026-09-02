@@ -3,7 +3,18 @@
  */
 import { CVListItem, CVDetail, KeepaliveStatus, Citation, ChatMessage } from '../types'
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '')
+const getApiBase = (): string => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '')
+  }
+  if (typeof window !== 'undefined' && window.location.hostname.includes('onrender.com')) {
+    return 'https://serverless-cv-rag-backend.onrender.com'
+  }
+  return 'http://localhost:8000'
+}
+
+const API_BASE = getApiBase()
 
 export const apiService = {
   async getKeepalive(): Promise<KeepaliveStatus> {
