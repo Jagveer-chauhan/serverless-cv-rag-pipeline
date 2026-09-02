@@ -1,6 +1,7 @@
 """In-memory PDF text extraction service using PyMuPDF with pytesseract OCR fallback."""
 import io
 import logging
+from typing import Tuple, Dict, Any, Optional
 try:
     import fitz
 except ImportError:
