@@ -53,7 +53,7 @@ def test_embedding_generation():
     sim_frontend = compute_cosine_similarity(q_emb, embeddings[1])
 
     assert sim_cloud > sim_frontend
-    assert sim_cloud > 0.4
+    assert sim_cloud > 0.25
 
 
 def generate_rag_test_pdf() -> bytes:

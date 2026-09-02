@@ -58,6 +58,18 @@ async def generate_rag_sse_stream(
     ]
     yield f"event: citations\ndata: {json.dumps({'citations': citations_data})}\n\n"
 
+    if not chunks:
+        welcome_msg = (
+            "Welcome! No candidate CVs have been ingested yet. "
+            "Please click the **'Ingest New CV'** button on the left to upload a CV (e.g. from the `samples/` directory) "
+            "and start querying skills, experience, and match intelligence!"
+        )
+        for word in welcome_msg.split(" "):
+            yield f"event: token\ndata: {json.dumps({'token': word + ' '})}\n\n"
+            await asyncio.sleep(0.015)
+        yield f"event: done\ndata: {json.dumps({'status': 'complete', 'chunks_used': 0})}\n\n"
+        return
+
     # 2. Formulate RAG context
     context_text = "\n\n".join(
         f"[EXCERPT {i+1} - {c['section_name']} (Relevance: {c['similarity']*100:.1f}%)]:\n{c['content']}"
