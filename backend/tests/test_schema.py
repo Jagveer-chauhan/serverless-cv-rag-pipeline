@@ -6,7 +6,9 @@ from backend.app.schemas.cv_schema import (
     CandidateInfo,
     WorkExperienceItem,
     EducationItem,
-    SkillCategory,
+    SkillsBlock,
+    DerivedInsights,
+    InferredSignals,
 )
 
 
@@ -14,9 +16,8 @@ def test_schema_valid_and_dynamic_extras():
     # Nested models allow dynamic arbitrary fields (extra='allow')
     exp_item = WorkExperienceItem(
         company="Antigravity AI",
-        position="Senior Staff Architect",
+        title="Senior Staff Architect",
         start_date="2022-01",
-        is_current=True,
         security_clearance="Top Secret",  # Dynamic extra attribute
         patent_ids=["US123456", "US789012"],  # Dynamic extra attribute
         budget_managed_usd=5000000  # Dynamic extra attribute
@@ -36,17 +37,24 @@ def test_schema_valid_and_dynamic_extras():
     assert getattr(cand_info, "github_handle") == "evelyn-wright"
 
     root_schema = CVExtractionSchema(
-        candidate_info=cand_info,
+        candidate=cand_info,
         summary="Leading AI and distributed systems researcher.",
-        work_experience=[exp_item],
-        education=[EducationItem(institution="MIT", degree="Ph.D.", field_of_study="Artificial Intelligence")],
-        skills=[SkillCategory(category_name="ML", skills=["PyTorch", "Transformers"])]
+        experience=[exp_item],
+        education=[EducationItem(institution="MIT", degree="Ph.D.")],
+        skills=SkillsBlock(
+            explicit=["PyTorch", "Transformers", "FastAPI"],
+            inferred=["System Design"],
+            soft_skills=["Mentorship"]
+        ),
+        derived=DerivedInsights(years_of_experience=8, seniority_level="Senior"),
+        inferred=InferredSignals(communication_style="Technical and concise")
     )
 
     data = root_schema.model_dump()
-    assert data["candidate_info"]["name"] == "Dr. Evelyn Wright"
-    assert data["work_experience"][0]["company"] == "Antigravity AI"
-    assert data["work_experience"][0]["security_clearance"] == "Top Secret"
+    assert data["candidate"]["name"] == "Dr. Evelyn Wright"
+    assert data["experience"][0]["company"] == "Antigravity AI"
+    assert data["experience"][0]["security_clearance"] == "Top Secret"
+    assert "PyTorch" in data["skills"]["explicit"]
 
 
 def test_root_schema_forbids_unknown_top_level_fields():

@@ -1,0 +1,91 @@
+{
+  "candidate": {
+    "name": "John Doe",
+    "email": "john.doe@example.com",
+    "phone": "+1 555 123 4567",
+    "location": "Berlin, Germany",
+    "links": {
+      "linkedin": "https://linkedin.com/in/johndoe",
+      "github": "https://github.com/johndoe",
+      "portfolio": null,
+      "other": []
+    }
+  },
+  "summary": "Senior Python engineer with 7 years of experience architecting high-throughput distributed microservices, serverless APIs, and pgvector RAG pipelines.",
+  "experience": [
+    {
+      "company": "Acme Corp",
+      "title": "Senior Backend Engineer",
+      "start_date": "2021-03",
+      "end_date": "2024-07",
+      "duration_months": 40,
+      "description": "Led migration to microservices...",
+      "technologies": ["Python", "FastAPI", "Kubernetes", "PostgreSQL", "pgvector"],
+      "achievements": ["Reduced API latency by 35%", "Improved throughput by 40%"],
+      "inferred_skills": ["Team Leadership", "System Design"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "MIT",
+      "degree": "BSc Computer Science",
+      "start_date": "2010-09",
+      "end_date": "2014-06",
+      "gpa": null,
+      "notes": null
+    }
+  ],
+  "skills": {
+    "explicit": ["Python", "FastAPI", "Kubernetes", "PostgreSQL", "pgvector", "Docker", "Redis", "CI/CD"],
+    "inferred": ["System Design", "Microservices Architecture", "Performance Tuning"],
+    "soft_skills": ["Technical Leadership", "Collaboration"]
+  },
+  "certifications": [
+    {
+      "name": "AWS Certified Solutions Architect",
+      "issuer": "Amazon",
+      "date": "2023-01",
+      "url": null
+    }
+  ],
+  "derived": {
+    "years_of_experience": 7.0,
+    "seniority_level": "Senior",
+    "career_gaps": [],
+    "career_trajectory": "Backend Developer -> Senior Backend Architect",
+    "domain": "SaaS / Cloud Infrastructure",
+    "languages": ["English", "German"]
+  },
+  "inferred": {
+    "leadership_signals": ["Led migration to microservices", "Mentored team members"],
+    "communication_style": "Concise, data-driven technical communication",
+    "potential_red_flags": [],
+    "career_objective": "Seeking Principal / Lead Backend roles"
+  },
+  "sections": [],
+  "raw_text": "John Doe\\nSenior Backend Architect...",
+  "confidence_scores": {
+    "overall": 0.95,
+    "experience_dates": 0.92,
+    "inferred_skills": 0.88
+  },
+  "processing_metadata": {
+    "model": "google/gemma-3-4b-it",
+    "extraction_time_ms": 1420.5,
+    "chunks_used": 3,
+    "retry_count": 0,
+    "cold_start": false,
+    "status": "rag_ready",
+    "timing_ms": {
+      "text_extraction": 42.0,
+      "chunking": 4.5,
+      "llm_extraction": 850.0,
+      "validation": 25.0,
+      "merge": 18.0,
+      "embedding": 120.0,
+      "vector_upsert": 280.0,
+      "rag_verification": 81.0,
+      "total_processing": 1420.5
+    }
+  }
+}

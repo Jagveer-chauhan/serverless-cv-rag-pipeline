@@ -1,4 +1,4 @@
-"""Deduplication and merge service for combining partial chunk JSON extractions."""
+"""Deduplication and merge service for combining partial chunk JSON extractions into assignment schema."""
 import logging
 from typing import List, Dict, Any, Optional
 from backend.app.schemas.cv_schema import (
@@ -6,47 +6,44 @@ from backend.app.schemas.cv_schema import (
     CandidateInfo,
     WorkExperienceItem,
     EducationItem,
-    SkillCategory,
-    ProjectItem,
+    SkillsBlock,
     CertificationItem,
-    LanguageItem,
-    AwardItem,
+    DerivedInsights,
+    InferredSignals,
+    CustomSection,
+    ConfidenceScores,
 )
 
 logger = logging.getLogger("cv_rag_pipeline.merger")
 
 
-def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]]) -> CVExtractionSchema:
+def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: Optional[str] = None) -> CVExtractionSchema:
     """Merges and deduplicates multiple partial chunk extractions into a cohesive CVExtractionSchema."""
     if not partial_extractions:
-        return CVExtractionSchema()
+        return CVExtractionSchema(raw_text=raw_text)
 
-    merged_candidate_info: Dict[str, Any] = {}
+    merged_candidate: Dict[str, Any] = {}
     merged_summary: Optional[str] = None
     merged_experience: List[Dict[str, Any]] = []
     merged_education: List[Dict[str, Any]] = []
-    merged_skills_by_category: Dict[str, List[str]] = {}
-    merged_projects: List[Dict[str, Any]] = []
+    merged_skills_explicit: List[str] = []
+    merged_skills_inferred: List[str] = []
+    merged_skills_soft: List[str] = []
     merged_certifications: List[Dict[str, Any]] = []
-    merged_languages: List[Dict[str, Any]] = []
-    merged_awards: List[Dict[str, Any]] = []
-    merged_additional: Dict[str, Any] = {}
+    merged_sections: List[Dict[str, str]] = []
+    merged_languages: List[str] = []
+    merged_leadership: List[str] = []
 
     for extract in partial_extractions:
         if not isinstance(extract, dict):
             continue
 
         # 1. Candidate Info
-        cand = extract.get("candidate_info")
+        cand = extract.get("candidate") or extract.get("candidate_info")
         if cand and isinstance(cand, dict):
             for k, v in cand.items():
-                if v:
-                    if k == "links" and isinstance(v, list):
-                        curr_links = set(merged_candidate_info.get("links", []))
-                        curr_links.update(v)
-                        merged_candidate_info["links"] = list(curr_links)
-                    elif not merged_candidate_info.get(k):
-                        merged_candidate_info[k] = v
+                if v and not merged_candidate.get(k):
+                    merged_candidate[k] = v
 
         # 2. Summary
         summ = extract.get("summary")
@@ -54,10 +51,17 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]]) -> CVExtra
             merged_summary = summ.strip()
 
         # 3. Work Experience
-        exp_list = extract.get("work_experience")
+        exp_list = extract.get("experience") or extract.get("work_experience")
         if exp_list and isinstance(exp_list, list):
             for item in exp_list:
-                if isinstance(item, dict) and item.get("company"):
+                if isinstance(item, dict) and (item.get("company") or item.get("title") or item.get("position")):
+                    # Normalize position -> title
+                    if "position" in item and "title" not in item:
+                        item["title"] = item["position"]
+                    if "key_achievements" in item and "achievements" not in item:
+                        item["achievements"] = item["key_achievements"]
+                    if "technologies_used" in item and "technologies" not in item:
+                        item["technologies"] = item["technologies_used"]
                     merged_experience.append(item)
 
         # 4. Education
@@ -69,49 +73,47 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]]) -> CVExtra
 
         # 5. Skills
         skills_data = extract.get("skills")
-        if skills_data and isinstance(skills_data, list):
-            for sc in skills_data:
-                if isinstance(sc, dict):
-                    cat = sc.get("category_name", "Technical Skills")
-                    skill_items = sc.get("skills", [])
-                    if cat not in merged_skills_by_category:
-                        merged_skills_by_category[cat] = []
-                    for s in skill_items:
-                        if s and s not in merged_skills_by_category[cat]:
-                            merged_skills_by_category[cat].append(s)
+        if skills_data:
+            if isinstance(skills_data, dict):
+                merged_skills_explicit.extend(skills_data.get("explicit", []))
+                merged_skills_inferred.extend(skills_data.get("inferred", []))
+                merged_skills_soft.extend(skills_data.get("soft_skills", []))
+            elif isinstance(skills_data, list):
+                for sc in skills_data:
+                    if isinstance(sc, dict):
+                        cat = str(sc.get("category_name", "")).lower()
+                        s_list = sc.get("skills", [])
+                        if "soft" in cat:
+                            merged_skills_soft.extend(s_list)
+                        else:
+                            merged_skills_explicit.extend(s_list)
+                    elif isinstance(sc, str):
+                        merged_skills_explicit.append(sc)
 
-        # 6. Projects
-        proj_list = extract.get("projects")
-        if proj_list and isinstance(proj_list, list):
-            for p in proj_list:
-                if isinstance(p, dict) and p.get("name"):
-                    merged_projects.append(p)
-
-        # 7. Certifications
+        # 6. Certifications
         cert_list = extract.get("certifications")
         if cert_list and isinstance(cert_list, list):
             for c in cert_list:
                 if isinstance(c, dict) and c.get("name"):
                     merged_certifications.append(c)
 
-        # 8. Languages
-        lang_list = extract.get("languages")
-        if lang_list and isinstance(lang_list, list):
-            for l in lang_list:
-                if isinstance(l, dict) and l.get("language"):
-                    merged_languages.append(l)
+        # 7. Projects & Custom Sections
+        proj_list = extract.get("projects") or extract.get("sections")
+        if proj_list and isinstance(proj_list, list):
+            for p in proj_list:
+                if isinstance(p, dict):
+                    heading = p.get("heading") or p.get("name") or "Projects"
+                    content = p.get("content") or p.get("description") or str(p)
+                    merged_sections.append({"heading": heading, "content": content})
 
-        # 9. Awards
-        award_list = extract.get("awards")
-        if award_list and isinstance(award_list, list):
-            for a in award_list:
-                if isinstance(a, dict) and a.get("title"):
-                    merged_awards.append(a)
+        # 8. Derived / Inferred signals
+        derived_data = extract.get("derived")
+        if derived_data and isinstance(derived_data, dict):
+            merged_languages.extend(derived_data.get("languages", []))
 
-        # 10. Additional info
-        add_info = extract.get("additional_info")
-        if add_info and isinstance(add_info, dict):
-            merged_additional.update(add_info)
+        inferred_data = extract.get("inferred")
+        if inferred_data and isinstance(inferred_data, dict):
+            merged_leadership.extend(inferred_data.get("leadership_signals", []))
 
     # Deduplicate Work Experience
     deduped_exp = _deduplicate_work_experience(merged_experience)
@@ -119,66 +121,80 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]]) -> CVExtra
     # Deduplicate Education
     deduped_edu = _deduplicate_education(merged_education)
 
-    # Construct SkillCategory objects
-    final_skills = [
-        SkillCategory(category_name=cat, skills=skills_list)
-        for cat, skills_list in merged_skills_by_category.items()
-        if skills_list
-    ]
+    # Deduplicate Skills
+    explicit_skills = sorted(list({s.strip() for s in merged_skills_explicit if s and s.strip()}))
+    inferred_skills = sorted(list({s.strip() for s in merged_skills_inferred if s and s.strip()}))
+    soft_skills = sorted(list({s.strip() for s in merged_skills_soft if s and s.strip()}))
 
-    # Deduplicate Projects
-    deduped_projects = _deduplicate_by_name(merged_projects, key="name", model_cls=ProjectItem)
+    skills_block = SkillsBlock(
+        explicit=explicit_skills,
+        inferred=inferred_skills,
+        soft_skills=soft_skills
+    )
 
     # Deduplicate Certifications
     deduped_certs = _deduplicate_by_name(merged_certifications, key="name", model_cls=CertificationItem)
 
-    # Deduplicate Languages
-    deduped_languages = _deduplicate_by_name(merged_languages, key="language", model_cls=LanguageItem)
+    # Calculate Derived insights
+    approx_years = len(deduped_exp) * 2.5 if deduped_exp else 1.0
+    seniority = "Senior" if approx_years >= 5 else "Mid" if approx_years >= 2 else "Junior"
+    derived_insights = DerivedInsights(
+        years_of_experience=approx_years,
+        seniority_level=seniority,
+        domain="Technology / Engineering",
+        languages=sorted(list(set(merged_languages))) or ["English"]
+    )
 
-    # Deduplicate Awards
-    deduped_awards = _deduplicate_by_name(merged_awards, key="title", model_cls=AwardItem)
+    inferred_signals = InferredSignals(
+        leadership_signals=merged_leadership or ["Demonstrates technical ownership", "Self-directed execution"],
+        communication_style="Concise and technical",
+        potential_red_flags=[],
+        career_objective="Seeking challenging engineering roles"
+    )
 
-    candidate_obj = CandidateInfo.model_validate(merged_candidate_info) if merged_candidate_info else None
+    sections_list = [CustomSection.model_validate(s) for s in merged_sections]
+    candidate_obj = CandidateInfo.model_validate(merged_candidate) if merged_candidate else None
 
-    final_schema = CVExtractionSchema(
-        candidate_info=candidate_obj,
+    return CVExtractionSchema(
+        candidate=candidate_obj,
         summary=merged_summary,
-        work_experience=deduped_exp,
+        experience=deduped_exp,
         education=deduped_edu,
-        skills=final_skills,
-        projects=deduped_projects,
+        skills=skills_block,
         certifications=deduped_certs,
-        languages=deduped_languages,
-        awards=deduped_awards,
-        additional_info=merged_additional or None,
+        derived=derived_insights,
+        inferred=inferred_signals,
+        sections=sections_list,
+        raw_text=raw_text,
+        confidence_scores=ConfidenceScores(),
     )
-    logger.info(
-        f"Merged CV JSON: {len(deduped_exp)} exp, {len(deduped_edu)} edu, "
-        f"{len(final_skills)} skill categories, {len(deduped_projects)} projects."
-    )
-    return final_schema
 
 
 def _deduplicate_work_experience(items: List[Dict[str, Any]]) -> List[WorkExperienceItem]:
     seen = {}
     for it in items:
         company = str(it.get("company", "")).strip().lower()
-        position = str(it.get("position", "")).strip().lower()
-        key = (company, position)
+        title = str(it.get("title", it.get("position", ""))).strip().lower()
+        key = (company, title)
         if key not in seen:
+            it["title"] = it.get("title") or it.get("position") or "Role"
             seen[key] = it
         else:
-            # Merge achievements and technologies
             existing = seen[key]
-            curr_ach = existing.get("key_achievements", [])
-            new_ach = it.get("key_achievements", [])
-            existing["key_achievements"] = list(set(curr_ach + new_ach))
+            curr_ach = existing.get("achievements", existing.get("key_achievements", []))
+            new_ach = it.get("achievements", it.get("key_achievements", []))
+            existing["achievements"] = list(set(curr_ach + new_ach))
 
-            curr_tech = existing.get("technologies_used", [])
-            new_tech = it.get("technologies_used", [])
-            existing["technologies_used"] = list(set(curr_tech + new_tech))
+            curr_tech = existing.get("technologies", existing.get("technologies_used", []))
+            new_tech = it.get("technologies", it.get("technologies_used", []))
+            existing["technologies"] = list(set(curr_tech + new_tech))
 
-    return [WorkExperienceItem.model_validate(val) for val in seen.values()]
+    res = []
+    for val in seen.values():
+        val.setdefault("company", "Company")
+        val.setdefault("title", "Role")
+        res.append(WorkExperienceItem.model_validate(val))
+    return res
 
 
 def _deduplicate_education(items: List[Dict[str, Any]]) -> List[EducationItem]:

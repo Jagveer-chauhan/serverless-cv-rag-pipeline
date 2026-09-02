@@ -1,24 +1,30 @@
-"""Schemas package."""
+"""Schemas package exports."""
 from backend.app.schemas.cv_schema import (
     CVExtractionSchema,
     CandidateInfo,
+    CandidateLinks,
     WorkExperienceItem,
     EducationItem,
-    SkillCategory,
-    ProjectItem,
+    SkillsBlock,
     CertificationItem,
-    LanguageItem,
-    AwardItem,
+    DerivedInsights,
+    InferredSignals,
+    CustomSection,
+    ConfidenceScores,
+    ProcessingMetadata,
 )
 
 __all__ = [
     "CVExtractionSchema",
     "CandidateInfo",
+    "CandidateLinks",
     "WorkExperienceItem",
     "EducationItem",
-    "SkillCategory",
-    "ProjectItem",
+    "SkillsBlock",
     "CertificationItem",
-    "LanguageItem",
-    "AwardItem",
+    "DerivedInsights",
+    "InferredSignals",
+    "CustomSection",
+    "ConfidenceScores",
+    "ProcessingMetadata",
 ]

@@ -1,0 +1,84 @@
+{
+  "candidate": {
+    "name": "Marcus Chen",
+    "email": "marcus.chen@techcorp.com",
+    "phone": null,
+    "location": "San Francisco, CA",
+    "links": {
+      "linkedin": null,
+      "github": null,
+      "portfolio": "https://marcuschen.dev",
+      "other": []
+    }
+  },
+  "summary": "Frontend leader with 8+ years experience architecting responsive React, TypeScript, and Vite applications with real-time SSE streaming.",
+  "experience": [
+    {
+      "company": "CloudScale Systems",
+      "title": "Frontend Architect",
+      "start_date": "2021-06",
+      "end_date": "Present",
+      "duration_months": 36,
+      "description": "Built real-time RAG visualization dashboard consuming Server-Sent Events...",
+      "technologies": ["React 18", "TypeScript", "Vite", "TailwindCSS", "WebSockets", "SSE", "Next.js"],
+      "achievements": ["Engineered 3-pane glassmorphic UI with micro-waterfall timings", "Zero build errors with strict TypeScript"],
+      "inferred_skills": ["UI/UX Engineering", "Frontend Architecture", "Design Systems"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "UC Berkeley",
+      "degree": "B.S. in Electrical Engineering & Computer Science",
+      "start_date": "2013-09",
+      "end_date": "2017-05",
+      "gpa": null,
+      "notes": null
+    }
+  ],
+  "skills": {
+    "explicit": ["React 18", "TypeScript", "Vite", "TailwindCSS", "WebSockets", "SSE", "Next.js", "Jest"],
+    "inferred": ["State Management", "Performance Optimization", "Accessibility"],
+    "soft_skills": ["Product Sense", "Design Collaboration"]
+  },
+  "certifications": [],
+  "derived": {
+    "years_of_experience": 8.0,
+    "seniority_level": "Architect / Lead",
+    "career_gaps": [],
+    "career_trajectory": "Frontend Developer -> Senior -> Frontend Architect",
+    "domain": "Developer Tools / AI Web Interfaces",
+    "languages": ["English", "Mandarin"]
+  },
+  "inferred": {
+    "leadership_signals": ["Frontend Architecture leadership", "Led design systems adoption"],
+    "communication_style": "Design and user-experience focused",
+    "potential_red_flags": [],
+    "career_objective": "Leading frontend engineering for AI systems"
+  },
+  "sections": [],
+  "raw_text": "Marcus Chen\\nStaff Frontend Engineer...",
+  "confidence_scores": {
+    "overall": 0.97,
+    "experience_dates": 0.95,
+    "inferred_skills": 0.92
+  },
+  "processing_metadata": {
+    "model": "google/gemma-3-4b-it",
+    "extraction_time_ms": 1390.0,
+    "chunks_used": 3,
+    "retry_count": 0,
+    "cold_start": false,
+    "status": "rag_ready",
+    "timing_ms": {
+      "text_extraction": 38.0,
+      "chunking": 4.0,
+      "llm_extraction": 790.0,
+      "validation": 20.0,
+      "merge": 16.0,
+      "embedding": 110.0,
+      "vector_upsert": 290.0,
+      "rag_verification": 122.0,
+      "total_processing": 1390.0
+    }
+  }
+}

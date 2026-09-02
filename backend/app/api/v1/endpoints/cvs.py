@@ -106,7 +106,6 @@ async def upload_cv(
             tracer=tracer
         )
 
-        # Query chunks count
         chunk_count = len(updated_doc.chunks) if updated_doc.chunks else len(summary["stages"])
 
         return CVUploadResponse(
@@ -127,6 +126,70 @@ async def upload_cv(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"CV processing pipeline failed: {str(e)}"
         )
+
+from pydantic import BaseModel, Field
+from backend.app.schemas.cv_schema import CVExtractionSchema
+from backend.app.services.llm_extractor import LLMExtractor
+from backend.app.services.merger import merge_extracted_chunks
+from backend.app.services.chunker import TextChunk
+
+class ExtractRequest(BaseModel):
+    document_id: str
+    chunks: Optional[List[Dict[str, Any]]] = None
+
+@router.post(
+    "/extract",
+    summary="Extract & Merge CV JSON",
+    description="Accepts pre-processed text chunks or fetches stored chunks for a CV, calls serverless Gemma with validation retry loop, and returns merged cohesive CV JSON."
+)
+async def extract_cv_json(
+    request: ExtractRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    doc = await db.get(CVDocument, request.document_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"CV document '{request.document_id}' not found."
+        )
+
+    extractor = LLMExtractor()
+    try:
+        # If chunks provided in body, use them, otherwise use stored chunks
+        if request.chunks:
+            text_chunks = [
+                TextChunk(
+                    chunk_index=i,
+                    section_name=c.get("section_name", "GENERAL"),
+                    content=c.get("content", ""),
+                    token_count=c.get("token_count", 10)
+                )
+                for i, c in enumerate(request.chunks)
+            ]
+        else:
+            text_chunks = [
+                TextChunk(
+                    chunk_index=c.chunk_index,
+                    section_name=c.section_name,
+                    content=c.content,
+                    token_count=c.token_count
+                )
+                for c in doc.chunks
+            ]
+
+        partial_results = await extractor.extract_all_chunks_parallel(text_chunks)
+        merged_schema = merge_extracted_chunks(partial_results, raw_text=doc.raw_text)
+        
+        doc.parsed_json = merged_schema.model_dump()
+        await db.commit()
+
+        return {
+            "document_id": doc.id,
+            "status": "extracted",
+            "extracted_json": doc.parsed_json
+        }
+    finally:
+        await extractor.close()
 
 
 @router.get(

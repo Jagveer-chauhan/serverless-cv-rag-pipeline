@@ -1,0 +1,89 @@
+{
+  "candidate": {
+    "name": "Elena Rostova",
+    "email": "elena.rostova@ai-innovations.io",
+    "phone": "+44 20 7946 0991",
+    "location": "London, UK",
+    "links": {
+      "linkedin": null,
+      "github": "https://github.com/elena-ai",
+      "portfolio": null,
+      "other": []
+    }
+  },
+  "summary": "Staff ML Engineer specializing in transformer fine-tuning, embedding retrieval models, and low-latency LLM inference.",
+  "experience": [
+    {
+      "company": "DeepAI Labs",
+      "title": "Principal ML Engineer",
+      "start_date": "2020-01",
+      "end_date": "Present",
+      "duration_months": 48,
+      "description": "Deployed open-source Gemma-3-4B inference server on serverless GPUs...",
+      "technologies": ["PyTorch", "Transformers", "SentenceTransformers", "vLLM", "CUDA", "pgvector"],
+      "achievements": ["Optimized vector search pipeline with custom HNSW indexing", "Sub-second LLM streaming latency"],
+      "inferred_skills": ["Model Optimization", "Distributed Inference"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "University of Cambridge",
+      "degree": "Ph.D. in Computer Science",
+      "start_date": "2015-09",
+      "end_date": "2019-06",
+      "gpa": null,
+      "notes": "Doctoral research in deep learning"
+    }
+  ],
+  "skills": {
+    "explicit": ["PyTorch", "Transformers", "SentenceTransformers", "vLLM", "Python", "CUDA", "pgvector"],
+    "inferred": ["Vector Embeddings", "RAG Pipeline Engineering", "LLM Fine-tuning"],
+    "soft_skills": ["Research Communication", "Cross-Functional Collaboration"]
+  },
+  "certifications": [],
+  "derived": {
+    "years_of_experience": 8.0,
+    "seniority_level": "Principal / Staff",
+    "career_gaps": [],
+    "career_trajectory": "PhD Researcher -> Senior ML -> Principal ML Engineer",
+    "domain": "Artificial Intelligence / LLM Infrastructure",
+    "languages": ["English", "Russian"]
+  },
+  "inferred": {
+    "leadership_signals": ["Principal technical ownership", "Published peer-reviewed workshop papers"],
+    "communication_style": "Deeply technical and research-oriented",
+    "potential_red_flags": [],
+    "career_objective": "Leading AI & LLM Systems engineering"
+  },
+  "sections": [
+    {
+      "heading": "PUBLICATIONS",
+      "content": "Optimizing LLM Inference on Serverless GPUs, NeurIPS Workshop 2023"
+    }
+  ],
+  "raw_text": "Elena Rostova\\nLead Machine Learning Engineer...",
+  "confidence_scores": {
+    "overall": 0.96,
+    "experience_dates": 0.94,
+    "inferred_skills": 0.91
+  },
+  "processing_metadata": {
+    "model": "google/gemma-3-4b-it",
+    "extraction_time_ms": 1580.0,
+    "chunks_used": 3,
+    "retry_count": 0,
+    "cold_start": false,
+    "status": "rag_ready",
+    "timing_ms": {
+      "text_extraction": 45.0,
+      "chunking": 5.0,
+      "llm_extraction": 920.0,
+      "validation": 22.0,
+      "merge": 19.0,
+      "embedding": 135.0,
+      "vector_upsert": 310.0,
+      "rag_verification": 124.0,
+      "total_processing": 1580.0
+    }
+  }
+}

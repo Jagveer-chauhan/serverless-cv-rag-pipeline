@@ -71,6 +71,17 @@ async def add_process_time_header(request: Request, call_next):
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
+@app.get("/health", summary="Basic Health Check")
+async def health():
+    return {
+        "status": "healthy",
+        "warm": app_state.is_warm,
+        "uptime_seconds": round(app_state.uptime_seconds, 2),
+        "llm_model": settings.HF_MODEL_NAME,
+        "embedding_model": settings.EMBEDDING_MODEL_NAME
+    }
+
+
 @app.get("/", summary="Root Health Status")
 async def root():
     return {
@@ -78,6 +89,7 @@ async def root():
         "status": "online",
         "warm": app_state.is_warm,
         "sla_target_ms": settings.SLA_TARGET_MS,
+        "health": "/health",
         "docs": "/docs",
         "keepalive": f"{settings.API_V1_STR}/keepalive"
     }

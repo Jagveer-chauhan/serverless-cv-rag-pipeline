@@ -1,94 +1,122 @@
-"""Pydantic v2 schemas for structured CV extraction and dynamic attribute validation."""
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, ConfigDict, Field, EmailStr
+"""Pydantic v2 schemas for structured CV extraction matching assignment specification."""
+from typing import List, Optional, Dict, Any, Union
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DynamicBaseModel(BaseModel):
-    """Base model allowing dynamic extra fields for flexible extraction."""
+    """Nested model allowing dynamic extra fields for flexible candidate extraction."""
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
+class CandidateLinks(DynamicBaseModel):
+    linkedin: Optional[str] = None
+    github: Optional[str] = None
+    portfolio: Optional[str] = None
+    other: List[str] = Field(default_factory=list)
+
+
 class CandidateInfo(DynamicBaseModel):
-    name: Optional[str] = Field(None, description="Full name of the candidate")
-    email: Optional[str] = Field(None, description="Primary email address")
-    phone: Optional[str] = Field(None, description="Phone / contact number")
-    location: Optional[str] = Field(None, description="City, State, Country")
-    links: Optional[List[str]] = Field(default_factory=list, description="LinkedIn, GitHub, Portfolio URLs")
-    title: Optional[str] = Field(None, description="Professional headline or title")
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    links: Optional[Union[CandidateLinks, Dict[str, Any], List[str]]] = None
+    title: Optional[str] = None
 
 
 class WorkExperienceItem(DynamicBaseModel):
-    company: str = Field(..., description="Name of the employing company or organization")
-    position: str = Field(..., description="Job title / role")
-    start_date: Optional[str] = Field(None, description="Start date (e.g., '2021-06' or 'June 2021')")
-    end_date: Optional[str] = Field(None, description="End date (e.g., 'Present' or '2023-12')")
-    is_current: bool = Field(False, description="Whether this is the current job")
-    location: Optional[str] = Field(None, description="Office location or Remote")
-    description: Optional[str] = Field(None, description="Role summary and duties")
-    key_achievements: List[str] = Field(default_factory=list, description="Quantified achievements and impact bullets")
-    technologies_used: List[str] = Field(default_factory=list, description="Tools and technologies utilized")
+    company: str
+    title: str = Field(..., description="Position or role title")
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    duration_months: Optional[int] = None
+    description: Optional[str] = None
+    technologies: List[str] = Field(default_factory=list)
+    achievements: List[str] = Field(default_factory=list)
+    inferred_skills: List[str] = Field(default_factory=list)
 
 
 class EducationItem(DynamicBaseModel):
-    institution: str = Field(..., description="University, College, or School name")
-    degree: Optional[str] = Field(None, description="Degree earned (e.g., 'B.S.', 'M.S.', 'Ph.D.')")
-    field_of_study: Optional[str] = Field(None, description="Major, discipline, or field of study")
-    start_year: Optional[str] = Field(None, description="Start year")
-    end_year: Optional[str] = Field(None, description="Graduation year or expected graduation")
-    gpa: Optional[str] = Field(None, description="Grade point average or honors")
-    honors: List[str] = Field(default_factory=list, description="Academic honors or scholarships")
+    institution: str
+    degree: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    gpa: Optional[Union[str, float]] = None
+    notes: Optional[str] = None
 
 
-class SkillCategory(DynamicBaseModel):
-    category_name: str = Field(..., description="Category (e.g., 'Languages', 'Frameworks', 'Databases', 'Cloud')")
-    skills: List[str] = Field(default_factory=list, description="List of individual skill names")
-    proficiency_level: Optional[str] = Field(None, description="Beginner, Intermediate, Advanced, Expert")
-
-
-class ProjectItem(DynamicBaseModel):
-    name: str = Field(..., description="Project title or name")
-    description: Optional[str] = Field(None, description="Project summary and impact")
-    role: Optional[str] = Field(None, description="Role in project")
-    technologies: List[str] = Field(default_factory=list, description="Tech stack utilized")
-    link: Optional[str] = Field(None, description="URL or repository link")
+class SkillsBlock(DynamicBaseModel):
+    explicit: List[str] = Field(default_factory=list)
+    inferred: List[str] = Field(default_factory=list)
+    soft_skills: List[str] = Field(default_factory=list)
 
 
 class CertificationItem(DynamicBaseModel):
-    name: str = Field(..., description="Certification or license title")
-    issuer: Optional[str] = Field(None, description="Issuing organization (e.g., AWS, GCP, Microsoft)")
-    issue_date: Optional[str] = Field(None, description="Date issued")
-    expiry_date: Optional[str] = Field(None, description="Expiration date")
-    credential_id: Optional[str] = Field(None, description="Credential or verification ID")
-    link: Optional[str] = Field(None, description="Verification URL")
+    name: str
+    issuer: Optional[str] = None
+    date: Optional[str] = None
+    url: Optional[str] = None
 
 
-class LanguageItem(DynamicBaseModel):
-    language: str = Field(..., description="Language name (e.g., 'English', 'Spanish')")
-    proficiency: Optional[str] = Field(None, description="Proficiency level (e.g., 'Native', 'Fluent', 'Professional')")
+class CareerGapItem(DynamicBaseModel):
+    start_date: Optional[str] = Field(None, alias="from")
+    end_date: Optional[str] = Field(None, alias="to")
+    reason: Optional[str] = None
 
 
-class AwardItem(DynamicBaseModel):
-    title: str = Field(..., description="Award or honor title")
-    issuer: Optional[str] = Field(None, description="Granting organization")
-    date: Optional[str] = Field(None, description="Date received")
-    description: Optional[str] = Field(None, description="Details or criteria")
+class DerivedInsights(DynamicBaseModel):
+    years_of_experience: Optional[float] = None
+    seniority_level: Optional[str] = None  # Junior, Mid, Senior, Lead, Principal, Executive
+    career_gaps: List[Dict[str, Any]] = Field(default_factory=list)
+    career_trajectory: Optional[str] = None
+    domain: Optional[str] = None
+    languages: List[str] = Field(default_factory=list)
+
+
+class InferredSignals(DynamicBaseModel):
+    leadership_signals: List[str] = Field(default_factory=list)
+    communication_style: Optional[str] = None
+    potential_red_flags: List[str] = Field(default_factory=list)
+    career_objective: Optional[str] = None
+
+
+class CustomSection(DynamicBaseModel):
+    heading: str
+    content: str
+
+
+class ConfidenceScores(DynamicBaseModel):
+    overall: float = 0.92
+    experience_dates: float = 0.88
+    inferred_skills: float = 0.85
+
+
+class ProcessingMetadata(DynamicBaseModel):
+    request_id: Optional[str] = None
+    model: str = "google/gemma-3-4b-it"
+    status: str = "rag_ready"
+    upload_accepted_at: Optional[str] = None
+    rag_ready_at: Optional[str] = None
+    extraction_time_ms: Optional[float] = None
+    chunks_used: int = 0
+    retry_count: int = 0
+    cold_start: bool = False
+    timing_ms: Dict[str, float] = Field(default_factory=dict)
 
 
 class CVExtractionSchema(BaseModel):
-    """Root Pydantic v2 schema for structured CV extraction.
-    
-    Fixed top-level fields ensure consistent API contracts, while nested models
-    use ConfigDict(extra='allow') for dynamic candidate attributes.
-    """
+    """Fixed top-level schema supporting dynamic sections per assignment specification."""
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    candidate_info: Optional[CandidateInfo] = Field(default=None, description="Contact and personal information")
-    summary: Optional[str] = Field(default=None, description="Professional summary or objective statement")
-    work_experience: List[WorkExperienceItem] = Field(default_factory=list, description="Work and employment history")
-    education: List[EducationItem] = Field(default_factory=list, description="Academic degrees and qualifications")
-    skills: List[SkillCategory] = Field(default_factory=list, description="Categorized technical and soft skills")
-    projects: List[ProjectItem] = Field(default_factory=list, description="Key projects and portfolios")
-    certifications: List[CertificationItem] = Field(default_factory=list, description="Certificates and licenses")
-    languages: List[LanguageItem] = Field(default_factory=list, description="Spoken/written languages")
-    awards: List[AwardItem] = Field(default_factory=list, description="Honors, awards, and recognitions")
-    additional_info: Optional[Dict[str, Any]] = Field(default=None, description="Any other pertinent resume details")
+    candidate: Optional[CandidateInfo] = Field(default=None, alias="candidate_info")
+    summary: Optional[str] = None
+    experience: List[WorkExperienceItem] = Field(default_factory=list, alias="work_experience")
+    education: List[EducationItem] = Field(default_factory=list)
+    skills: Optional[Union[SkillsBlock, List[Any], Dict[str, Any]]] = None
+    certifications: List[CertificationItem] = Field(default_factory=list)
+    derived: Optional[DerivedInsights] = None
+    inferred: Optional[InferredSignals] = None
+    sections: List[CustomSection] = Field(default_factory=list, description="Dynamic custom sections (Publications, Volunteering, Projects)")
+    raw_text: Optional[str] = None
+    confidence_scores: Optional[ConfidenceScores] = Field(default_factory=ConfidenceScores)
+    processing_metadata: Optional[ProcessingMetadata] = None

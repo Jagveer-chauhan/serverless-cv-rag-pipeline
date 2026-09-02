@@ -42,42 +42,41 @@ async def test_llm_extractor_parallel_extraction():
     # Test merge logic
     merged_schema = merge_extracted_chunks(partial_results)
 
-    assert merged_schema.candidate_info is not None
-    assert merged_schema.candidate_info.name == "Sarah Connor"
-    assert merged_schema.candidate_info.email == "sarah@skynet-resistance.org"
+    assert merged_schema.candidate is not None
+    assert merged_schema.candidate.name == "Sarah Connor"
+    assert merged_schema.candidate.email == "sarah@skynet-resistance.org"
     assert "Defense Leader" in (merged_schema.summary or "")
-    assert len(merged_schema.work_experience) >= 1
-    assert len(merged_schema.skills) >= 1
+    assert len(merged_schema.experience) >= 1
+    assert merged_schema.skills is not None
 
     await extractor.close()
 
 
 def test_merge_deduplication():
     partial_a = {
-        "candidate_info": {"name": "John Smith", "email": "john@example.com"},
-        "work_experience": [
-            {"company": "Google", "position": "Senior Engineer", "key_achievements": ["Launched Feature A"]}
+        "candidate": {"name": "John Smith", "email": "john@example.com"},
+        "experience": [
+            {"company": "Google", "title": "Senior Engineer", "achievements": ["Launched Feature A"]}
         ],
-        "skills": [{"category_name": "Backend", "skills": ["Python", "FastAPI"]}]
+        "skills": {"explicit": ["Python", "FastAPI"]}
     }
 
     partial_b = {
-        "candidate_info": {"phone": "+1 555-0100"},
-        "work_experience": [
-            {"company": "Google", "position": "Senior Engineer", "key_achievements": ["Optimized Latency B"]}
+        "candidate": {"phone": "+1 555-0100"},
+        "experience": [
+            {"company": "Google", "title": "Senior Engineer", "achievements": ["Optimized Latency B"]}
         ],
-        "skills": [{"category_name": "Backend", "skills": ["FastAPI", "SQLAlchemy", "PostgreSQL"]}]
+        "skills": {"explicit": ["FastAPI", "SQLAlchemy", "PostgreSQL"]}
     }
 
     merged = merge_extracted_chunks([partial_a, partial_b])
 
-    assert merged.candidate_info.name == "John Smith"
-    assert merged.candidate_info.phone == "+1 555-0100"
+    assert merged.candidate.name == "John Smith"
+    assert merged.candidate.phone == "+1 555-0100"
     
     # Verify work experience deduplicated into 1 entry with merged achievements
-    assert len(merged.work_experience) == 1
-    assert len(merged.work_experience[0].key_achievements) == 2
+    assert len(merged.experience) == 1
+    assert len(merged.experience[0].achievements) == 2
 
     # Verify skills deduplicated
-    backend_skills = next(s for s in merged.skills if s.category_name == "Backend")
-    assert len(backend_skills.skills) == 4  # Python, FastAPI, SQLAlchemy, PostgreSQL
+    assert len(merged.skills.explicit) == 4  # Python, FastAPI, SQLAlchemy, PostgreSQL
