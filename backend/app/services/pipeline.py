@@ -1,4 +1,5 @@
 """Unified end-to-end CV Ingestion and RAG Pipeline orchestrator adhering to p95 <= 5.0s SLA."""
+import json
 import logging
 from typing import List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,13 +75,23 @@ async def execute_cv_pipeline(
         db_chunks: List[CVChunk] = []
         async with tracer.trace_stage("vector_upsert"):
             for tc, emb in zip(text_chunks, embeddings):
+                embedding_data = emb
+                if isinstance(embedding_data, str):
+                    try:
+                        embedding_data = json.loads(embedding_data)
+                    except Exception:
+                        embedding_data = []
+
+                # Force strict list of Python floats (removes string or numpy types)
+                clean_embedding = [float(x) for x in embedding_data] if embedding_data else None
+
                 db_chunk = CVChunk(
                     document_id=doc.id,
                     chunk_index=tc.chunk_index,
                     section_name=tc.section_name,
                     content=tc.content,
                     token_count=tc.token_count,
-                    embedding=emb,
+                    embedding=clean_embedding,
                     metadata_json=tc.metadata
                 )
                 db.add(db_chunk)
@@ -120,14 +131,17 @@ async def execute_cv_pipeline(
 
     except Exception as e:
         logger.error(f"Pipeline failed for document {doc.id}: {e}", exc_info=True)
+        await db.rollback()  # Reset the aborted transaction first
+        
+        # Now safely update the document status
         try:
-            await db.rollback()
             doc.status = "failed"
             doc.error_message = str(e)
+            db.add(doc)
             await db.commit()
             await tracer.persist(db, document_id=doc.id)
         except Exception as rollback_err:
             logger.error(f"Failed to record failed status in db: {rollback_err}")
-        raise
+        raise e
     finally:
         await extractor.close()

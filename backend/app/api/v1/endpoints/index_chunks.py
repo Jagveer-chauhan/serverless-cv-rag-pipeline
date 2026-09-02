@@ -1,4 +1,5 @@
 """Vector Indexing API endpoint."""
+import json
 import logging
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -73,13 +74,21 @@ async def index_cv_chunks(
     # Upsert chunks into database
     created_chunks = []
     for c_data, emb in zip(chunks_to_index, embeddings):
+        emb_data = emb
+        if isinstance(emb_data, str):
+            try:
+                emb_data = json.loads(emb_data)
+            except Exception:
+                emb_data = []
+        clean_emb = [float(x) for x in emb_data] if emb_data else None
+
         chunk_obj = CVChunk(
             document_id=doc.id,
             chunk_index=c_data["chunk_index"],
             section_name=c_data["section_name"],
             content=c_data["content"],
             token_count=c_data.get("token_count", 0),
-            embedding=emb,
+            embedding=clean_emb,
             metadata_json=c_data.get("metadata")
         )
         db.add(chunk_obj)
