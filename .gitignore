@@ -24,6 +24,10 @@ wheels/
 .coverage
 htmlcov/
 .env
+.env.*
+*.env
+backend/.env
+frontend/.env
 
 # Virtual Environment
 venv/
