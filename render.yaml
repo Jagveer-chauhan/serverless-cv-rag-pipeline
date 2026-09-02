@@ -1,0 +1,40 @@
+services:
+  # Backend FastAPI Web Service
+  - type: web
+    name: cv-rag-backend
+    runtime: python
+    buildCommand: "./build.sh"
+    startCommand: "uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT --workers 2"
+    plan: free
+    region: oregon
+    healthCheckPath: /api/v1/keepalive
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
+      - key: SUPABASE_DB_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: HF_API_KEY
+        sync: false
+      - key: HF_MODEL_NAME
+        value: "google/gemma-3-4b-it"
+      - key: EMBEDDING_MODEL_NAME
+        value: "sentence-transformers/all-MiniLM-L6-v2"
+      - key: SLA_TARGET_MS
+        value: "5000.0"
+
+  # Frontend Vite Static Site
+  - type: static
+    name: cv-rag-frontend
+    buildCommand: "cd frontend && npm install && npm run build"
+    staticPublishPath: "./frontend/dist"
+    plan: free
+    region: oregon
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://cv-rag-backend.onrender.com
