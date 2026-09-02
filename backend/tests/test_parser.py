@@ -52,5 +52,36 @@ def test_pymupdf_direct_extraction():
 
 
 def test_empty_pdf_raises_error():
-    with pytest.raises(ValueError, match="PDF content is empty"):
+    with pytest.raises(ValueError, match="Document content.*is empty|PDF content is empty"):
         extract_text_from_pdf(b"", filename="empty.pdf")
+
+
+def test_docx_extraction():
+    from backend.app.services.parser import extract_text_from_docx, extract_text_from_document
+    import docx
+
+    doc = docx.Document()
+    doc.add_heading("Alex Rivera - Senior Cloud Architect", 0)
+    doc.add_paragraph("Email: alex.rivera@example.com | Skills: AWS, Python, Kubernetes")
+    
+    table = doc.add_table(rows=2, cols=2)
+    table.rows[0].cells[0].text = "Company"
+    table.rows[0].cells[1].text = "Role"
+    table.rows[1].cells[0].text = "TechCorp"
+    table.rows[1].cells[1].text = "Staff Engineer"
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    docx_bytes = buf.getvalue()
+
+    # Test direct docx extractor
+    text, meta = extract_text_from_docx(docx_bytes, filename="alex_cv.docx")
+    assert "Alex Rivera" in text
+    assert "alex.rivera@example.com" in text
+    assert "TechCorp" in text
+    assert meta["parser"] == "python_docx"
+
+    # Test unified document extractor
+    text_uni, meta_uni = extract_text_from_document(docx_bytes, filename="alex_cv.docx")
+    assert "Alex Rivera" in text_uni
+    assert meta_uni["char_count"] > 30

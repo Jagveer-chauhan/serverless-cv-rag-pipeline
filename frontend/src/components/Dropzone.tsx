@@ -22,25 +22,37 @@ export function Dropzone({ onUpload, isUploading }: DropzoneProps) {
     }
   }
 
+  const isSupportedFile = (file: File) => {
+    const name = file.name.toLowerCase()
+    return (
+      name.endsWith('.pdf') ||
+      name.endsWith('.docx') ||
+      name.endsWith('.doc') ||
+      file.type === 'application/pdf' ||
+      file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      file.type === 'application/msword'
+    )
+  }
+
   const validateAndAddFiles = (files: FileList | null) => {
     if (!files) return
     setError(null)
-    const validPdfs: File[] = []
+    const validDocs: File[] = []
 
     Array.from(files).forEach((file) => {
-      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      if (isSupportedFile(file)) {
         if (file.size > 15 * 1024 * 1024) {
           setError(`File ${file.name} exceeds 15MB limit.`)
         } else {
-          validPdfs.push(file)
+          validDocs.push(file)
         }
       } else {
-        setError(`Skipped ${file.name}: Only PDF documents are supported.`)
+        setError(`Skipped ${file.name}: Only PDF and Word documents (.docx, .doc) are supported.`)
       }
     })
 
-    if (validPdfs.length > 0) {
-      setSelectedFiles((prev) => [...prev, ...validPdfs])
+    if (validDocs.length > 0) {
+      setSelectedFiles((prev) => [...prev, ...validDocs])
     }
   }
 
@@ -86,7 +98,7 @@ export function Dropzone({ onUpload, isUploading }: DropzoneProps) {
           ref={inputRef}
           type="file"
           multiple
-          accept=".pdf,application/pdf"
+          accept=".pdf,.docx,.doc,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
           onChange={(e) => validateAndAddFiles(e.target.files)}
           className="hidden"
         />
@@ -97,10 +109,10 @@ export function Dropzone({ onUpload, isUploading }: DropzoneProps) {
           </div>
           <div>
             <p className="text-sm font-semibold text-white">
-              Drop CV PDFs here, or <span className="text-emerald-400 underline decoration-emerald-500/50">browse</span>
+              Drop CV documents (PDF, Word) here, or <span className="text-emerald-400 underline decoration-emerald-500/50">browse</span>
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              Supports multi-page &amp; scanned PDFs (In-memory PyMuPDF + OCR fallback) &bull; Max 15MB
+              Supports multi-page PDFs &amp; Word files (.docx, .doc) &bull; Max 15MB
             </p>
           </div>
         </div>

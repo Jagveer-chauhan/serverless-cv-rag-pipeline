@@ -5,16 +5,20 @@ import { CVListItem } from '../types'
 interface CVListSidebarProps {
   cvs: CVListItem[]
   selectedId: string | null
+  loadingDocId?: string | null
+  deletingId?: string | null
   onSelect: (id: string) => void
-  onDelete: (id: string, e: React.MouseEvent) => void
+  onDeleteRequest: (cv: CVListItem, e: React.MouseEvent) => void
   loading: boolean
 }
 
 export function CVListSidebar({
   cvs,
   selectedId,
+  loadingDocId,
+  deletingId,
   onSelect,
-  onDelete,
+  onDeleteRequest,
   loading,
 }: CVListSidebarProps) {
   const [searchTerm, setSearchTerm] = useState('')
@@ -100,40 +104,62 @@ export function CVListSidebar({
         ) : (
           filteredCvs.map((cv) => {
             const isSelected = cv.id === selectedId
+            const isDocLoading = loadingDocId === cv.id
+            const isDocDeleting = deletingId === cv.id
 
             return (
               <div
                 key={cv.id}
-                onClick={() => onSelect(cv.id)}
+                onClick={() => !isDocDeleting && onSelect(cv.id)}
                 className={`group p-3 rounded-xl cursor-pointer transition-all duration-150 border text-xs relative ${
-                  isSelected
+                  isDocDeleting
+                    ? 'opacity-60 bg-rose-950/20 border-rose-500/30 cursor-not-allowed'
+                    : isSelected
                     ? 'bg-emerald-500/10 border-emerald-500/40 shadow-sm'
                     : 'bg-slate-900/50 hover:bg-slate-900 border-slate-800/80 hover:border-slate-700'
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-start space-x-2 truncate">
-                    <FileText
-                      className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
-                        isSelected ? 'text-emerald-400' : 'text-slate-400 group-hover:text-slate-200'
-                      }`}
-                    />
-                    <div className="truncate">
-                      <p className="font-semibold text-slate-100 truncate">{cv.filename}</p>
+                  <div className="flex items-start space-x-2 truncate flex-1">
+                    {isDocLoading ? (
+                      <Loader2 className="w-4 h-4 mt-0.5 flex-shrink-0 animate-spin text-emerald-400" />
+                    ) : (
+                      <FileText
+                        className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
+                          isSelected ? 'text-emerald-400' : 'text-slate-400 group-hover:text-slate-200'
+                        }`}
+                      />
+                    )}
+                    <div className="truncate flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-semibold text-slate-100 truncate">{cv.filename}</p>
+                        {isDocLoading && (
+                          <span className="text-[10px] text-emerald-400 font-mono animate-pulse">
+                            loading...
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[11px] text-slate-400 font-mono mt-0.5">
                         {(cv.file_size / 1024).toFixed(1)} KB
                       </p>
                     </div>
                   </div>
 
-                  {/* Delete Button */}
-                  <button
-                    onClick={(e) => onDelete(cv.id, e)}
-                    title="Delete document"
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-all"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {/* Delete Button / Deleting State */}
+                  {isDocDeleting ? (
+                    <div className="flex items-center space-x-1 text-rose-400 text-[10px] font-mono font-medium bg-rose-500/10 px-2 py-0.5 rounded-md border border-rose-500/20">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Deleting...</span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => onDeleteRequest(cv, e)}
+                      title="Delete document"
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-all"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 {/* Status & Latency Footer */}
@@ -154,3 +180,4 @@ export function CVListSidebar({
     </aside>
   )
 }
+

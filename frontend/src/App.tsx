@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Header } from './components/Header'
 import { Dropzone } from './components/Dropzone'
 import { CVListSidebar } from './components/CVListSidebar'
@@ -6,6 +6,8 @@ import { ChatInterface } from './components/ChatInterface'
 import { HRProfileView } from './components/HRProfileView'
 import { JSONInspector } from './components/JSONInspector'
 import { TraceInspector } from './components/TraceInspector'
+import { DeleteConfirmModal } from './components/DeleteConfirmModal'
+import { InspectorLoadingSkeleton } from './components/InspectorLoadingSkeleton'
 import { CVListItem, CVDetail, ChatMessage, KeepaliveStatus, Citation } from './types'
 import { apiService } from './services/api'
 import { UserCheck, Code2, Activity, UploadCloud, X, Zap } from 'lucide-react'
@@ -14,6 +16,7 @@ export function App() {
   const [cvs, setCvs] = useState<CVListItem[]>([])
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
   const [selectedDoc, setSelectedDoc] = useState<CVDetail | null>(null)
+  const [loadingCvDetail, setLoadingCvDetail] = useState(false)
   const [rightTab, setRightTab] = useState<'hr' | 'json' | 'traces'>('hr')
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
@@ -22,6 +25,11 @@ export function App() {
   const [keepalive, setKeepalive] = useState<KeepaliveStatus | null>(null)
   const [loadingKeepalive, setLoadingKeepalive] = useState(false)
   const [loadingCvs, setLoadingCvs] = useState(false)
+
+  // Delete modal state
+  const [docToDelete, setDocToDelete] = useState<CVListItem | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // Fetch Keepalive
   const fetchKeepalive = useCallback(async () => {
@@ -52,13 +60,16 @@ export function App() {
     }
   }, [selectedDocId])
 
-  // Fetch Single CV Detail
+  // Fetch Single CV Detail with loading state
   const fetchCvDetail = useCallback(async (id: string) => {
+    setLoadingCvDetail(true)
     try {
       const data = await apiService.getCVDetail(id)
       setSelectedDoc(data)
     } catch {
       setSelectedDoc(null)
+    } finally {
+      setLoadingCvDetail(false)
     }
   }, [])
 
@@ -94,19 +105,38 @@ export function App() {
     }
   }
 
-  // Delete CV Handler
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  // Delete CV Request Handler (opens modal)
+  const handleDeleteRequest = (cv: CVListItem, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!window.confirm('Delete this CV and all its indexed embeddings?')) return
+    setDeleteError(null)
+    setDocToDelete(cv)
+  }
+
+  // Delete CV Confirmation Handler
+  const handleConfirmDelete = async () => {
+    if (!docToDelete) return
+    setIsDeleting(true)
+    setDeleteError(null)
     try {
-      await apiService.deleteCV(id)
-      if (selectedDocId === id) {
-        setSelectedDocId(null)
-        setSelectedDoc(null)
+      await apiService.deleteCV(docToDelete.id)
+      const deletedId = docToDelete.id
+      setDocToDelete(null)
+      
+      // Update selected doc if deleted
+      if (selectedDocId === deletedId) {
+        const remaining = cvs.filter((c) => c.id !== deletedId)
+        if (remaining.length > 0) {
+          setSelectedDocId(remaining[0].id)
+        } else {
+          setSelectedDocId(null)
+          setSelectedDoc(null)
+        }
       }
       await fetchCvs()
     } catch (err: any) {
-      alert(`Delete error: ${err.message}`)
+      setDeleteError(err.message || 'Failed to delete CV document. Please try again.')
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -207,8 +237,10 @@ export function App() {
           <CVListSidebar
             cvs={cvs}
             selectedId={selectedDocId}
+            loadingDocId={loadingCvDetail ? selectedDocId : null}
+            deletingId={isDeleting && docToDelete ? docToDelete.id : null}
             onSelect={setSelectedDocId}
-            onDelete={handleDelete}
+            onDeleteRequest={handleDeleteRequest}
             loading={loadingCvs}
           />
         </div>
@@ -266,7 +298,9 @@ export function App() {
 
           {/* Tab Content Body */}
           <div className="flex-1 overflow-y-auto p-4">
-            {!selectedDoc ? (
+            {loadingCvDetail ? (
+              <InspectorLoadingSkeleton />
+            ) : !selectedDoc ? (
               <div className="h-full flex flex-col items-center justify-center text-center text-xs text-slate-500 p-6 space-y-2">
                 <Zap className="w-8 h-8 text-slate-700" />
                 <p>Select an ingested CV from the left sidebar to inspect details.</p>
@@ -307,8 +341,24 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={!!docToDelete}
+        cv={docToDelete}
+        isDeleting={isDeleting}
+        error={deleteError}
+        onConfirm={handleConfirmDelete}
+        onClose={() => {
+          if (!isDeleting) {
+            setDocToDelete(null)
+            setDeleteError(null)
+          }
+        }}
+      />
     </div>
   )
 }
 
 export default App
+

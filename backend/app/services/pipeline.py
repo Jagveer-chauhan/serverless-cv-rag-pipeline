@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models.cv_document import CVDocument
 from backend.app.models.cv_chunk import CVChunk
 from backend.app.observability.tracer import PipelineTracer
-from backend.app.services.parser import extract_text_from_pdf
+from backend.app.services.parser import extract_text_from_document
 from backend.app.services.chunker import chunk_cv_text, TextChunk
 from backend.app.services.llm_extractor import LLMExtractor
 from backend.app.services.merger import merge_extracted_chunks
@@ -38,10 +38,10 @@ async def execute_cv_pipeline(
 
     try:
         # =========================================================================
-        # Stage 1: Text Extraction (PyMuPDF In-Memory Parser with OCR fallback)
+        # Stage 1: Text Extraction (PyMuPDF / python-docx In-Memory Parser with OCR fallback)
         # =========================================================================
         async with tracer.trace_stage("text_extraction"):
-            raw_text, parse_meta = extract_text_from_pdf(pdf_bytes, filename=filename)
+            raw_text, parse_meta = extract_text_from_document(pdf_bytes, filename=filename)
             doc.raw_text = raw_text
 
         # =========================================================================

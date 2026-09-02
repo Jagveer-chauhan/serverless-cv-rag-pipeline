@@ -85,10 +85,10 @@ async def upload_cv(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
-    if not file.filename or not file.filename.lower().endswith((".pdf", ".docx")):
+    if not file.filename or not file.filename.lower().endswith((".pdf", ".docx", ".doc")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF and DOCX files are supported for CV ingestion."
+            detail="Only PDF, DOCX, and DOC files are supported for CV ingestion."
         )
 
     file_bytes = await file.read()
@@ -99,11 +99,21 @@ async def upload_cv(
             detail="Uploaded file is empty."
         )
 
+    # Determine default content_type if missing
+    content_type = file.content_type
+    if not content_type:
+        if file.filename.lower().endswith(".docx"):
+            content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        elif file.filename.lower().endswith(".doc"):
+            content_type = "application/msword"
+        else:
+            content_type = "application/pdf"
+
     # Initialize CVDocument record in database
     doc = CVDocument(
         filename=file.filename,
         file_size=file_size,
-        content_type=file.content_type or "application/pdf",
+        content_type=content_type,
         status="extracting"
     )
     try:
