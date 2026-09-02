@@ -147,13 +147,17 @@ async def chat_sse(
             detail="Query string cannot be empty."
         )
 
-    # 1. Retrieve top-k relevant chunks via vector similarity
-    chunks = await search_similar_chunks(
-        db=db,
-        query_text=request.query,
-        document_id=request.document_id,
-        top_k=request.top_k
-    )
+    try:
+        # 1. Retrieve top-k relevant chunks via vector similarity
+        chunks = await search_similar_chunks(
+            db=db,
+            query_text=request.query,
+            document_id=request.document_id,
+            top_k=request.top_k
+        )
+    except Exception as e:
+        logger.warning(f"Vector search exception in chat: {e}")
+        chunks = []
 
     # 2. Return SSE StreamingResponse
     return StreamingResponse(
@@ -167,5 +171,6 @@ async def chat_sse(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
         }
     )

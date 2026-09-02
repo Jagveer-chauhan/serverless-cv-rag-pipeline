@@ -204,21 +204,25 @@ async def extract_cv_json(
     description="Retrieve all uploaded CV documents with processing statuses and SLA timing metrics."
 )
 async def list_cvs(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(CVDocument).order_by(CVDocument.created_at.desc()))
-    docs = result.scalars().all()
-    return [
-        CVListItem(
-            id=d.id,
-            filename=d.filename,
-            file_size=d.file_size,
-            content_type=d.content_type,
-            status=d.status,
-            total_duration_ms=d.total_duration_ms,
-            created_at=d.created_at.isoformat() if d.created_at else None,
-            updated_at=d.updated_at.isoformat() if d.updated_at else None,
-        )
-        for d in docs
-    ]
+    try:
+        result = await db.execute(select(CVDocument).order_by(CVDocument.created_at.desc()))
+        docs = result.scalars().all()
+        return [
+            CVListItem(
+                id=d.id,
+                filename=d.filename,
+                file_size=d.file_size,
+                content_type=d.content_type,
+                status=d.status,
+                total_duration_ms=d.total_duration_ms,
+                created_at=d.created_at.isoformat() if d.created_at else None,
+                updated_at=d.updated_at.isoformat() if d.updated_at else None,
+            )
+            for d in docs
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to query CV list from database: {e}")
+        return []
 
 
 @router.get(

@@ -2,7 +2,7 @@
 import time
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -24,9 +24,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up Serverless CV Parsing & RAG Pipeline...")
     app_state.start_time = time.time()
     
-    # Warmup routines (pre-load lightweight models or test connections if configured)
     try:
-        # Mark warm once initialized
         app_state.is_warm = True
         logger.info(f"Pipeline warmed up successfully. SLA Target: {settings.SLA_TARGET_MS}ms")
     except Exception as e:
@@ -47,24 +45,50 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS Middleware
+# Universal CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_origin_regex=r"^https?://.*$",
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
     allow_headers=["*"],
     expose_headers=["X-Process-Time-Ms", "*"],
 )
 
 
 @app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    """Global timing middleware recording millisecond duration per HTTP request."""
+async def add_process_time_and_cors_headers(request: Request, call_next):
+    """Global middleware ensuring X-Process-Time-Ms and CORS headers on all responses."""
+    if request.method == "OPTIONS":
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"status": "ok"},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+
     start_time = time.perf_counter()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        logger.error(f"Unhandled server error on {request.url.path}: {exc}", exc_info=True)
+        response = JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": str(exc)},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+
     process_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
     response.headers["X-Process-Time-Ms"] = str(process_time_ms)
+    response.headers["Access-Control-Allow-Origin"] = "*"
     return response
 
 
