@@ -86,28 +86,42 @@ class CustomSection(DynamicBaseModel):
 
 
 class ConfidenceScores(DynamicBaseModel):
-    overall: float = 0.92
-    experience_dates: float = 0.88
-    inferred_skills: float = 0.85
+    """Dynamically calculated extraction confidence scores (not hardcoded)."""
+    overall: float = Field(default=0.0, description="Overall extraction confidence 0.0–1.0")
+    experience_dates: float = Field(default=0.0, description="Confidence in experience date parsing")
+    inferred_skills: float = Field(default=0.0, description="Confidence in inferred skills")
 
 
 class ProcessingMetadata(DynamicBaseModel):
+    """Full performance trace object as required by the assignment specification."""
     request_id: Optional[str] = None
     model: str = "google/gemma-3-4b-it"
+    provider: str = "Hugging Face Serverless Inference API"
     status: str = "rag_ready"
     upload_accepted_at: Optional[str] = None
     rag_ready_at: Optional[str] = None
     extraction_time_ms: Optional[float] = None
     chunks_used: int = 0
     retry_count: int = 0
+    # Cold-start tracking (required by spec §3.6)
     cold_start: bool = False
+    cold_start_ms: Optional[float] = None          # Time from boot → first inference
+    first_inference_ms: Optional[float] = None     # Latency of first LLM call
+    warm_inference_ms: Optional[float] = None      # Latency of warm subsequent calls
+    provider_queue_time_ms: Optional[float] = None # Provider-side queue latency (if available)
     timing_ms: Dict[str, float] = Field(default_factory=dict)
 
 
 class CVExtractionSchema(BaseModel):
-    """Fixed top-level schema supporting dynamic sections per assignment specification."""
+    """Fixed top-level schema supporting dynamic sections per assignment specification.
+
+    Top level is fixed (extra='forbid') with populate_by_name=True so both
+    field names and aliases are accepted during model_validate().
+    Nested models use extra='allow' to capture fields not in the base schema.
+    """
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
+    # populate_by_name=True ensures both 'candidate' and 'candidate_info' work
     candidate: Optional[CandidateInfo] = Field(default=None, alias="candidate_info")
     summary: Optional[str] = None
     experience: List[WorkExperienceItem] = Field(default_factory=list, alias="work_experience")
@@ -116,7 +130,46 @@ class CVExtractionSchema(BaseModel):
     certifications: List[CertificationItem] = Field(default_factory=list)
     derived: Optional[DerivedInsights] = None
     inferred: Optional[InferredSignals] = None
-    sections: List[CustomSection] = Field(default_factory=list, description="Dynamic custom sections (Publications, Volunteering, Projects)")
+    sections: List[CustomSection] = Field(
+        default_factory=list,
+        description="Dynamic custom sections (Publications, Volunteering, Projects, etc.)"
+    )
     raw_text: Optional[str] = None
     confidence_scores: Optional[ConfidenceScores] = Field(default_factory=ConfidenceScores)
     processing_metadata: Optional[ProcessingMetadata] = None
+
+
+def calculate_confidence_scores(schema: CVExtractionSchema) -> ConfidenceScores:
+    """Dynamically calculates extraction confidence based on fields populated vs expected."""
+    # Overall: ratio of non-empty top-level fields
+    filled = sum([
+        1 if schema.candidate and schema.candidate.name else 0,
+        1 if schema.summary else 0,
+        1 if schema.experience else 0,
+        1 if schema.education else 0,
+        1 if schema.skills else 0,
+        1 if schema.certifications else 0,
+        1 if schema.derived else 0,
+        1 if schema.inferred else 0,
+    ])
+    overall = round(filled / 8, 2)
+
+    # Experience dates confidence
+    exp_with_dates = [
+        e for e in schema.experience
+        if e.start_date or e.end_date
+    ] if schema.experience else []
+    exp_date_conf = (
+        round(len(exp_with_dates) / len(schema.experience), 2)
+        if schema.experience else 0.5
+    )
+
+    # Inferred skills confidence
+    inferred_count = len(schema.inferred.leadership_signals) if schema.inferred else 0
+    inferred_conf = min(1.0, round(inferred_count / 3, 2)) if inferred_count else 0.5
+
+    return ConfidenceScores(
+        overall=overall,
+        experience_dates=exp_date_conf,
+        inferred_skills=inferred_conf,
+    )

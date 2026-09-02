@@ -1,6 +1,20 @@
-"""Hugging Face Serverless LLM Extraction service with validation retry loop and asyncio.gather."""
+"""Hugging Face Serverless Inference API LLM extraction service.
+
+Provider choice: Hugging Face Serverless Inference API
+- Free tier, no credit card required
+- True serverless: scales to zero when not in use, billed per request
+- Hosts google/gemma-3-4b-it at zero idle cost
+- Per-request GPU allocation with automatic cold-start handling
+- Supports concurrent requests via asyncio.gather with semaphore
+
+Cold-start strategy:
+- HF loads the model container on first request (cold start)
+- Subsequent requests reuse the warm container (warm path)
+- cold_start is detected by comparing first vs subsequent request latencies
+"""
 import json
 import re
+import time
 import asyncio
 import logging
 from typing import List, Dict, Any, Optional
@@ -8,6 +22,7 @@ import httpx
 from pydantic import ValidationError
 
 from backend.app.core.config import settings
+from backend.app.core.state import app_state
 from backend.app.services.chunker import TextChunk
 from backend.app.schemas.cv_schema import CVExtractionSchema
 
@@ -47,18 +62,28 @@ def clean_json_response(raw_text: str) -> str:
 
 
 class LLMExtractor:
-    """Manages parallel LLM extraction and self-correcting validation retry loop."""
+    """Manages parallel LLM extraction via HF Serverless Inference API.
+
+    Provider: Hugging Face Serverless Inference API
+    - Model: google/gemma-3-4b-it
+    - Endpoint: https://api-inference.huggingface.co/models/{model}
+    - Scale-to-zero: Yes — HF unloads model after inactivity
+    - Cold-start: ~8-15s first request; ~1-3s warm requests
+    - Billing: Free tier (rate-limited); Pro tier per-second GPU billing
+    - Concurrency: Bounded by asyncio.Semaphore (default 5 parallel)
+    """
 
     def __init__(self, api_key: str = settings.HF_API_KEY, model_name: str = settings.HF_MODEL_NAME):
         self.api_key = api_key
         self.model_name = model_name
         self.api_url = settings.hf_llm_url
         self.client: Optional[httpx.AsyncClient] = None
+        self._retry_count: int = 0
 
     async def get_client(self) -> httpx.AsyncClient:
         if self.client is None or self.client.is_closed:
             self.client = httpx.AsyncClient(
-                timeout=httpx.Timeout(4.0, connect=1.5),
+                timeout=httpx.Timeout(30.0, connect=5.0),
                 headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
             )
         return self.client
@@ -73,7 +98,6 @@ class LLMExtractor:
         max_retries: int = 2
     ) -> Dict[str, Any]:
         """Extracts structured JSON from a single chunk with schema validation retry loop."""
-        # If no HF API key is configured, use fast rule-based extraction fallback for offline / test environments
         if not self.api_key:
             return self._heuristic_chunk_extraction(chunk)
 
@@ -81,6 +105,7 @@ class LLMExtractor:
         prompt = f"{EXTRACTION_SYSTEM_PROMPT}\n\n[RESUME SECTION EXCERPT]:\n{chunk.content}\n\n[OUTPUT JSON]:"
 
         for attempt in range(max_retries + 1):
+            t_start = time.perf_counter()
             try:
                 response = await client.post(
                     self.api_url,
@@ -90,13 +115,23 @@ class LLMExtractor:
                             "max_new_tokens": 1024,
                             "temperature": 0.1,
                             "return_full_text": False
-                        }
+                        },
+                        "options": {"wait_for_model": True}
                     }
                 )
-                
+
+                inference_ms = round((time.perf_counter() - t_start) * 1000, 2)
+                # Record cold-start vs warm inference in app state
+                app_state.record_inference(inference_ms)
+
+                if response.status_code == 503:
+                    # Model is loading — this is a cold start on the HF side
+                    logger.info(f"HF model loading (cold start) for chunk {chunk.chunk_index}, waiting...")
+                    await asyncio.sleep(10)
+                    continue
+
                 if response.status_code != 200:
-                    logger.warning(f"HF API returned status {response.status_code}: {response.text}")
-                    # Fallback to heuristic on HF error
+                    logger.warning(f"HF API returned status {response.status_code}: {response.text[:200]}")
                     return self._heuristic_chunk_extraction(chunk)
 
                 res_json = response.json()
@@ -113,17 +148,16 @@ class LLMExtractor:
                 if not isinstance(parsed_data, dict):
                     raise ValueError(f"Expected JSON object, got {type(parsed_data)}")
 
-                # Validate against schema (or partial schema)
-                # If top-level keys exist, validate via Pydantic
                 CVExtractionSchema.model_validate(parsed_data)
                 return parsed_data
 
             except (json.JSONDecodeError, ValidationError, ValueError) as val_err:
+                self._retry_count += 1
                 logger.warning(
-                    f"Chunk {chunk.chunk_index} validation failed (attempt {attempt + 1}/{max_retries + 1}): {val_err}"
+                    f"Chunk {chunk.chunk_index} validation failed "
+                    f"(attempt {attempt + 1}/{max_retries + 1}): {val_err}"
                 )
                 if attempt < max_retries:
-                    # Corrective prompt loop
                     prompt = (
                         f"{EXTRACTION_SYSTEM_PROMPT}\n\n"
                         f"[RESUME SECTION EXCERPT]:\n{chunk.content}\n\n"
@@ -131,20 +165,34 @@ class LLMExtractor:
                         f"Fix the error and output ONLY the valid JSON object:\n\n[OUTPUT JSON]:"
                     )
                 else:
-                    logger.error(f"Exhausted validation retries on chunk {chunk.chunk_index}. Falling back to heuristic.")
+                    logger.error(
+                        f"Exhausted validation retries on chunk {chunk.chunk_index}. "
+                        f"Falling back to heuristic."
+                    )
                     return self._heuristic_chunk_extraction(chunk)
             except Exception as e:
-                logger.error(f"Unexpected error in LLM extraction on chunk {chunk.chunk_index}: {e}", exc_info=True)
+                logger.error(
+                    f"Unexpected error in LLM extraction on chunk {chunk.chunk_index}: {e}",
+                    exc_info=True
+                )
                 return self._heuristic_chunk_extraction(chunk)
 
         return self._heuristic_chunk_extraction(chunk)
 
+    @property
+    def retry_count(self) -> int:
+        return self._retry_count
+
     async def extract_all_chunks_parallel(
         self,
         chunks: List[TextChunk],
-        max_concurrency: int = 5
+        max_concurrency: int = 3
     ) -> List[Dict[str, Any]]:
-        """Parallel extraction across all chunks using asyncio.gather with bounded concurrency."""
+        """Parallel extraction across all chunks using asyncio.gather with bounded concurrency.
+
+        Concurrency is capped at 3 for HF free-tier to avoid rate-limit 429s.
+        Increase to 5 if using a paid HF Inference Endpoint.
+        """
         if not chunks:
             return []
 
@@ -156,17 +204,17 @@ class LLMExtractor:
 
         tasks = [_bounded_extract(c) for c in chunks]
         results = await asyncio.gather(*tasks, return_exceptions=False)
-        return results
+        return list(results)
 
     def _heuristic_chunk_extraction(self, chunk: TextChunk) -> Dict[str, Any]:
-        """Fast, robust deterministic heuristic extraction for offline, fallback, and zero-key modes."""
+        """Fast, robust deterministic heuristic extraction for offline/fallback/zero-key modes."""
         content = chunk.content
         section = chunk.section_name
         data: Dict[str, Any] = {}
 
         if section == "CONTACT_HEADER" or "CONTACT" in section:
             email_match = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", content)
-            phone_match = re.search(r"\(?\+?[0-9]{1,3}\)?[-.\s]?[0-9]{3,4}[-.\s]?[0-9]{3,4}", content)
+            phone_match = re.search(r"\(?\+?[0-9]{1,3}\)?[-.\\s]?[0-9]{3,4}[-.\\s]?[0-9]{3,4}", content)
             lines = [l.strip() for l in content.splitlines() if l.strip() and not l.startswith("[")]
             name = lines[0] if lines else "Candidate"
             title = lines[1] if len(lines) > 1 and "@" not in lines[1] else None
@@ -185,7 +233,7 @@ class LLMExtractor:
 
         elif section == "EXPERIENCE":
             exp_items = []
-            blocks = re.split(r"\n(?=[A-Z][A-Za-z0-9\s]+(?:at|@|–|-|\()|\d{4})", content)
+            blocks = re.split(r"\n(?=[A-Z][A-Za-z0-9\s]+(?:at|@|–|-|\()|\\d{4})", content)
             for b in blocks:
                 b_clean = re.sub(r"^\[EXPERIENCE(?:.*?)]\s*", "", b).strip()
                 if not b_clean:
@@ -193,7 +241,6 @@ class LLMExtractor:
                 lines = [l.strip() for l in b_clean.splitlines() if l.strip()]
                 if lines:
                     title_line = lines[0]
-                    # Attempt parse "Role at Company"
                     company = "Company"
                     position = title_line
                     if " at " in title_line:
@@ -202,7 +249,6 @@ class LLMExtractor:
                     elif " - " in title_line:
                         parts = title_line.split(" - ", 1)
                         position, company = parts[0], parts[1]
-                    
                     bullets = [l.lstrip("-•* ") for l in lines[1:] if l.startswith(("-", "•", "*"))]
                     exp_items.append({
                         "company": company,
@@ -210,7 +256,9 @@ class LLMExtractor:
                         "key_achievements": bullets,
                         "description": " ".join(lines[1:]) if not bullets else None
                     })
-            data["work_experience"] = exp_items or [{"company": "Company", "position": "Professional", "description": content}]
+            data["work_experience"] = exp_items or [
+                {"company": "Company", "position": "Professional", "description": content}
+            ]
 
         elif section == "EDUCATION":
             edu_items = []
@@ -222,14 +270,16 @@ class LLMExtractor:
 
         elif section == "SKILLS":
             skills_text = re.sub(r"^\[SKILLS(?:.*?)]\s*", "", content).strip()
-            # Split by comma or newline
-            raw_skills = [s.strip() for s in re.split(r"[,|\n•]+", skills_text) if s.strip() and not s.startswith("[")]
+            raw_skills = [s.strip() for s in re.split(r"[,|\n•]+", skills_text)
+                          if s.strip() and not s.startswith("[")]
             data["skills"] = [{"category_name": "Technical Skills", "skills": raw_skills}]
 
         elif section == "PROJECTS":
             data["projects"] = [{"name": "Key Project", "description": content}]
 
         elif section == "CERTIFICATIONS":
-            data["certifications"] = [{"name": content.replace("[CERTIFICATIONS]", "").strip() or "Certification"}]
+            data["certifications"] = [
+                {"name": content.replace("[CERTIFICATIONS]", "").strip() or "Certification"}
+            ]
 
         return data

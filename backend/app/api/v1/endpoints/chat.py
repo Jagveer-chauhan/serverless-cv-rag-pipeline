@@ -26,7 +26,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     query: str = Field(..., description="Natural language question about the candidate/CV")
     document_id: Optional[str] = Field(None, description="Optional document ID filter for targeted querying")
-    top_k: int = Field(default=4, ge=1, le=10, description="Number of vector context chunks to retrieve")
+    top_k: int = Field(default=5, ge=1, le=10, description="Number of vector context chunks to retrieve (spec: k=5–10)")
     chat_history: Optional[List[ChatMessage]] = Field(default_factory=list, description="Prior conversation context")
 
 

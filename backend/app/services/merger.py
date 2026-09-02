@@ -11,7 +11,6 @@ from backend.app.schemas.cv_schema import (
     DerivedInsights,
     InferredSignals,
     CustomSection,
-    ConfidenceScores,
 )
 
 logger = logging.getLogger("cv_rag_pipeline.merger")
@@ -166,7 +165,7 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         inferred=inferred_signals,
         sections=sections_list,
         raw_text=raw_text,
-        confidence_scores=ConfidenceScores(),
+        # confidence_scores computed dynamically by calculate_confidence_scores() in pipeline.py
     )
 
 
