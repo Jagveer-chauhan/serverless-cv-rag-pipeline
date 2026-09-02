@@ -1,8 +1,10 @@
 """In-memory PDF text extraction service using PyMuPDF with pytesseract OCR fallback."""
 import io
 import logging
-from typing import Tuple, Dict, Any
-import pymupdf as fitz
+try:
+    import fitz
+except ImportError:
+    import pymupdf as fitz
 from PIL import Image
 
 logger = logging.getLogger("cv_rag_pipeline.parser")

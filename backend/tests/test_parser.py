@@ -1,7 +1,10 @@
 """Tests for in-memory PyMuPDF PDF parsing and OCR fallback."""
 import io
 import pytest
-import pymupdf as fitz
+try:
+    import fitz
+except ImportError:
+    import pymupdf as fitz
 from backend.app.services.parser import extract_text_from_pdf
 
 

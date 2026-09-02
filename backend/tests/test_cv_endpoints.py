@@ -1,7 +1,10 @@
 """Integration tests for CV upload, retrieval, and deletion endpoints."""
 import pytest
 import pytest_asyncio
-import pymupdf as fitz
+try:
+    import fitz
+except ImportError:
+    import pymupdf as fitz
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
