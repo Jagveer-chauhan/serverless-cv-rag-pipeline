@@ -1,13 +1,33 @@
 """Core configuration and settings management."""
 import os
-from typing import List, Union
-from pydantic import AnyHttpUrl, field_validator
+from pathlib import Path
+from typing import List, Union, Optional
+from dotenv import load_dotenv
+from pydantic import field_validator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Locate repository paths and explicitly load .env
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+ROOT_DIR = BACKEND_DIR.parent
+
+_candidate_env_paths = [
+    BACKEND_DIR / ".env",
+    ROOT_DIR / ".env",
+    Path(".env"),
+    Path("backend/.env")
+]
+
+# Load from the first existing .env file into os.environ
+for env_path in _candidate_env_paths:
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path, override=True)
+        break
 
 
 class Settings(BaseSettings):
+    """Application Settings strictly sourced from .env or environment variables."""
     model_config = SettingsConfigDict(
-        env_file=["backend/.env", ".env"],
+        env_file=[str(p) for p in _candidate_env_paths if p.exists()] or None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -31,22 +51,21 @@ class Settings(BaseSettings):
         "*"
     ]
 
-    # Supabase (PostgreSQL + pgvector)
-    # Default to sqlite or test fallback if SUPABASE_DB_URL is not provided
-    SUPABASE_DB_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
-    SUPABASE_KEY: str = ""
+    # Supabase (PostgreSQL + pgvector) - STRICTLY LOADED FROM .env
+    SUPABASE_DB_URL: str = Field(default="", description="PostgreSQL connection string loaded strictly from .env")
+    SUPABASE_KEY: str = Field(default="", description="Supabase API key loaded strictly from .env")
 
-    # Hugging Face Serverless Inference API
-    HF_API_KEY: str = ""
-    HF_MODEL_NAME: str = "google/gemma-3-4b-it"
+    # Hugging Face Serverless Inference API - STRICTLY LOADED FROM .env
+    HF_API_KEY: str = Field(default="", description="Hugging Face API token loaded strictly from .env")
+    HF_MODEL_NAME: str = Field(default="google/gemma-3-4b-it", description="Model name loaded from .env")
     HF_API_URL: str = "https://api-inference.huggingface.co/models/google/gemma-3-4b-it"
 
     # Embedding Model
     EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"
     EMBEDDING_DIM: int = 384
 
-    # Keepalive Security (Optional)
-    KEEPALIVE_SECRET: str = ""
+    # Keepalive Security - STRICTLY LOADED FROM .env
+    KEEPALIVE_SECRET: str = Field(default="", description="Optional keepalive secret token from .env")
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

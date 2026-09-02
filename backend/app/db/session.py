@@ -1,6 +1,6 @@
 """Asynchronous database engine, session management, and dependencies."""
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -14,17 +14,21 @@ from backend.app.models.base import Base
 logger = logging.getLogger("cv_rag_pipeline.db")
 
 # Create asynchronous SQLAlchemy engine
-def get_engine(db_url: str = settings.SUPABASE_DB_URL) -> AsyncEngine:
+def get_engine(db_url: Optional[str] = None) -> AsyncEngine:
+    url = db_url or settings.SUPABASE_DB_URL
+    if not url:
+        url = "sqlite+aiosqlite:///./cv_pipeline.db"
+
     connect_args = {}
-    if "sqlite" in db_url:
+    if "sqlite" in url:
         connect_args["check_same_thread"] = False
         return create_async_engine(
-            db_url,
+            url,
             echo=False,
             connect_args=connect_args,
         )
     return create_async_engine(
-        db_url,
+        url,
         echo=False,
         pool_size=10,
         max_overflow=20,
