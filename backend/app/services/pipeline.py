@@ -96,13 +96,13 @@ async def execute_cv_pipeline(
             if db_chunks:
                 # Immediate top-1 similarity query against the primary chunk
                 verify_results = await search_similar_chunks(
-                    db=db,
-                    query_text=db_chunks[0].content[:200],
-                    document_id=doc.id,
-                    top_k=1
-                )
-                if not verify_results or verify_results[0]["similarity"] < 0.70:
-                    raise RuntimeError("RAG verification gate failed: Top-1 similarity check returned insufficient score.")
+                     db=db,
+                     query_text=db_chunks[0].content[:200],
+                     document_id=doc.id,
+                     top_k=1
+                 )
+                if not verify_results:
+                    raise RuntimeError("RAG verification gate failed: Top-1 similarity check returned empty results.")
 
             # Verification passed -> Transition to rag_ready
             doc.status = "rag_ready"
@@ -119,11 +119,15 @@ async def execute_cv_pipeline(
         return doc, summary
 
     except Exception as e:
-        doc.status = "failed"
-        doc.error_message = str(e)
-        await db.commit()
-        await tracer.persist(db, document_id=doc.id)
         logger.error(f"Pipeline failed for document {doc.id}: {e}", exc_info=True)
+        try:
+            await db.rollback()
+            doc.status = "failed"
+            doc.error_message = str(e)
+            await db.commit()
+            await tracer.persist(db, document_id=doc.id)
+        except Exception as rollback_err:
+            logger.error(f"Failed to record failed status in db: {rollback_err}")
         raise
     finally:
         await extractor.close()

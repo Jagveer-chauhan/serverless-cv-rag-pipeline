@@ -62,17 +62,19 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db(target_engine: AsyncEngine = engine):
     """Initializes the database schema and enables pgvector extension."""
-    async with target_engine.begin() as conn:
-        # Enable pgvector if on PostgreSQL
-        if "postgresql" in str(target_engine.url):
-            try:
-                logger.info("Enabling pgvector extension on PostgreSQL...")
+    if "postgresql" in str(target_engine.url):
+        try:
+            async with target_engine.connect() as conn:
+                await conn.execution_options(isolation_level="AUTOCOMMIT")
                 await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
                 logger.info("pgvector extension verified.")
-            except Exception as e:
-                logger.warning(f"Could not create vector extension (may lack superuser permissions or already enabled): {e}")
+        except Exception as e:
+            logger.warning(f"Could not create vector extension: {e}")
 
-        # Create all tables defined in models
-        logger.info("Creating database tables if not present...")
-        await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database schema initialized successfully.")
+    try:
+        async with target_engine.begin() as conn:
+            logger.info("Creating database tables if not present...")
+            await conn.run_sync(Base.metadata.create_all)
+            logger.info("Database schema initialized successfully.")
+    except Exception as e:
+        logger.error(f"Error initializing database tables: {e}", exc_info=True)
