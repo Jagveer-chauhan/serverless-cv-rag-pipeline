@@ -7,7 +7,7 @@ services:
     startCommand: "uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT --workers 1"
     plan: free
     region: oregon
-    healthCheckPath: /api/v1/keepalive
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.8

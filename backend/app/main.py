@@ -71,7 +71,7 @@ async def add_process_time_header(request: Request, call_next):
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
-@app.get("/health", summary="Basic Health Check")
+@app.api_route("/health", methods=["GET", "HEAD"], summary="Basic Health Check")
 async def health():
     return {
         "status": "healthy",
@@ -82,7 +82,7 @@ async def health():
     }
 
 
-@app.get("/", summary="Root Health Status")
+@app.api_route("/", methods=["GET", "HEAD"], summary="Root Health Status")
 async def root():
     return {
         "service": settings.PROJECT_NAME,

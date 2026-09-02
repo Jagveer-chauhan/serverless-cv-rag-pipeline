@@ -50,14 +50,7 @@ def _generate_keepalive_response() -> KeepaliveResponse:
     summary="Keepalive health check",
     description="Lightweight endpoint pinged by external cron/uptime monitors to prevent Render 15-minute idle spin-down."
 )
-async def keepalive_get(
-    x_keepalive_token: Optional[str] = Header(None, alias="X-Keepalive-Token")
-):
-    if settings.KEEPALIVE_SECRET and x_keepalive_token != settings.KEEPALIVE_SECRET:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing X-Keepalive-Token header"
-        )
+async def keepalive_get():
     return _generate_keepalive_response()
 
 
@@ -70,7 +63,7 @@ async def keepalive_get(
 async def keepalive_post(
     x_keepalive_token: Optional[str] = Header(None, alias="X-Keepalive-Token")
 ):
-    if settings.KEEPALIVE_SECRET and x_keepalive_token != settings.KEEPALIVE_SECRET:
+    if settings.KEEPALIVE_SECRET and settings.KEEPALIVE_SECRET.strip() and x_keepalive_token != settings.KEEPALIVE_SECRET:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-Keepalive-Token header"
