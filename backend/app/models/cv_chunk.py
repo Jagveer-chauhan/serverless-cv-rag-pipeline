@@ -6,6 +6,13 @@ from sqlalchemy import String, Integer, Text, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.models.base import Base
+from backend.app.core.config import settings
+
+try:
+    from pgvector.sqlalchemy import Vector
+    EMBEDDING_TYPE = Vector(settings.EMBEDDING_DIM)
+except Exception:
+    EMBEDDING_TYPE = JSON
 
 
 class CVChunk(Base):
@@ -27,8 +34,8 @@ class CVChunk(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     
-    # Universal 384-dimensional vector embedding stored as JSON for portable cosine similarity
-    embedding: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    # 384-dimensional vector embedding for pgvector cosine similarity search
+    embedding: Mapped[Optional[Any]] = mapped_column(EMBEDDING_TYPE, nullable=True)
     metadata_json: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -37,7 +44,7 @@ class CVChunk(Base):
     )
 
     # Relationships
-    document: Mapped["CVDocument"] = relationship("CVDocument", back_populates="chunks", lazy="select")
+    document: Mapped["CVDocument"] = relationship("CVDocument", back_populates="chunks", lazy="selectin")
 
     def to_dict(self) -> dict:
         return {
