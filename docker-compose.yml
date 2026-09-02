@@ -10,7 +10,7 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - SUPABASE_DB_URL=${SUPABASE_DB_URL:-postgresql+asyncpg://postgres:postgres@db:5432/postgres}
+      - SUPABASE_DB_URL=${SUPABASE_DB_URL:-}
       - HF_API_KEY=${HF_API_KEY:-}
       - HF_MODEL_NAME=google/gemma-3-4b-it
       - SLA_TARGET_MS=5000.0
