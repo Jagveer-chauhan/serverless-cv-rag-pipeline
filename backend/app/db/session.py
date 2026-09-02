@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from backend.app.core.config import settings
-from backend.app.models.base import Base
+from backend.app.models import Base, CVDocument, CVChunk, CVProcessingTrace
 
 logger = logging.getLogger("cv_rag_pipeline.db")
 

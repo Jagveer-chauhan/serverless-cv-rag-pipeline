@@ -25,10 +25,12 @@ async def lifespan(app: FastAPI):
     app_state.start_time = time.time()
     
     try:
+        from backend.app.db.session import init_db
+        await init_db()
         app_state.is_warm = True
-        logger.info(f"Pipeline warmed up successfully. SLA Target: {settings.SLA_TARGET_MS}ms")
+        logger.info(f"Database schema initialized & pipeline warmed up successfully. SLA Target: {settings.SLA_TARGET_MS}ms")
     except Exception as e:
-        logger.error(f"Error during warmup: {e}", exc_info=True)
+        logger.error(f"Error during database initialization/warmup: {e}", exc_info=True)
         app_state.is_warm = False
         
     yield

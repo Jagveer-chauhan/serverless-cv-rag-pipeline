@@ -58,7 +58,7 @@ class LLMExtractor:
     async def get_client(self) -> httpx.AsyncClient:
         if self.client is None or self.client.is_closed:
             self.client = httpx.AsyncClient(
-                timeout=httpx.Timeout(15.0, connect=5.0),
+                timeout=httpx.Timeout(4.0, connect=1.5),
                 headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
             )
         return self.client

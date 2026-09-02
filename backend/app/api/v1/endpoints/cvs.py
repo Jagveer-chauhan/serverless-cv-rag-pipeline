@@ -105,9 +105,18 @@ async def upload_cv(
         content_type=file.content_type or "application/pdf",
         status="extracting"
     )
-    db.add(doc)
-    await db.commit()
-    await db.refresh(doc)
+    try:
+        db.add(doc)
+        await db.commit()
+        await db.refresh(doc)
+    except Exception as init_err:
+        await db.rollback()
+        logger.warning(f"Initial doc insert failed (possible missing tables), running init_db: {init_err}")
+        from backend.app.db.session import init_db
+        await init_db()
+        db.add(doc)
+        await db.commit()
+        await db.refresh(doc)
 
     tracer = PipelineTracer(document_id=doc.id)
 
