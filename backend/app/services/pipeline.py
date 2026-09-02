@@ -1,7 +1,10 @@
 """Unified end-to-end CV Ingestion and RAG Pipeline orchestrator adhering to p95 <= 5.0s SLA."""
 import json
+import uuid
 import logging
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Tuple
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.cv_document import CVDocument
@@ -72,8 +75,17 @@ async def execute_cv_pipeline(
         # =========================================================================
         # Stage 7: Vector Upsert (pgvector table persistence)
         # =========================================================================
+        # We bypass the SQLAlchemy ORM for the embedding column entirely.
+        # The ORM + pgvector.sqlalchemy.Vector requires the asyncpg codec to be
+        # registered on the connection, which consistently fails on free-tier
+        # Render/Supabase (run_async hook is unreliable in pooled async contexts).
+        #
+        # Solution: raw SQL INSERT with CAST(:embedding AS vector).
+        # asyncpg passes the embedding as a plain text string; PostgreSQL's
+        # pgvector extension casts it to vector itself.  Zero codec dependency.
         db_chunks: List[CVChunk] = []
         async with tracer.trace_stage("vector_upsert"):
+            now = datetime.now(timezone.utc)
             for tc, emb in zip(text_chunks, embeddings):
                 embedding_data = emb
 
@@ -84,28 +96,62 @@ async def execute_cv_pipeline(
                     except Exception:
                         embedding_data = []
 
-                # Convert to a strict Python list of native floats.
-                # pgvector.sqlalchemy.Vector's bind_processor expects a list (or
-                # numpy array) — NOT a pre-formatted string.  Passing a string
-                # causes it to call len() on the string (~3403 chars) rather than
-                # counting the 384 float elements, producing the
-                # "expected 384 dimensions, not 3403" ValueError.
-                # The asyncpg pgvector codec registered in session.py handles the
-                # wire-format serialisation automatically.
+                # Build the canonical pgvector string '[f1,f2,...,f384]'
                 clean_floats: list = [float(x) for x in embedding_data] if embedding_data else []
-                embedding_value = clean_floats if clean_floats else None
+                embedding_str: str | None = (
+                    f"[{','.join(str(v) for v in clean_floats)}]" if clean_floats else None
+                )
 
-                db_chunk = CVChunk(
+                chunk_id = str(uuid.uuid4())
+
+                if embedding_str:
+                    # PostgreSQL path: cast the text literal to vector inside the SQL
+                    await db.execute(
+                        text("""
+                            INSERT INTO cv_chunks
+                                (id, document_id, chunk_index, section_name,
+                                 content, token_count, embedding, metadata_json, created_at)
+                            VALUES
+                                (:id, :document_id, :chunk_index, :section_name,
+                                 :content, :token_count, CAST(:embedding AS vector),
+                                 CAST(:metadata_json AS json), :created_at)
+                        """),
+                        {
+                            "id": chunk_id,
+                            "document_id": doc.id,
+                            "chunk_index": tc.chunk_index,
+                            "section_name": tc.section_name,
+                            "content": tc.content,
+                            "token_count": tc.token_count,
+                            "embedding": embedding_str,
+                            "metadata_json": json.dumps(tc.metadata) if tc.metadata else "null",
+                            "created_at": now,
+                        }
+                    )
+                else:
+                    # Fallback: no embedding (shouldn't happen in practice)
+                    db_chunk = CVChunk(
+                        id=chunk_id,
+                        document_id=doc.id,
+                        chunk_index=tc.chunk_index,
+                        section_name=tc.section_name,
+                        content=tc.content,
+                        token_count=tc.token_count,
+                        embedding=None,
+                        metadata_json=tc.metadata,
+                        created_at=now,
+                    )
+                    db.add(db_chunk)
+
+                # Keep a lightweight reference for the verification stage
+                db_chunks.append(CVChunk(
+                    id=chunk_id,
                     document_id=doc.id,
                     chunk_index=tc.chunk_index,
                     section_name=tc.section_name,
                     content=tc.content,
                     token_count=tc.token_count,
-                    embedding=embedding_value,
-                    metadata_json=tc.metadata
-                )
-                db.add(db_chunk)
-                db_chunks.append(db_chunk)
+                ))
 
             doc.status = "indexing"
             await db.commit()

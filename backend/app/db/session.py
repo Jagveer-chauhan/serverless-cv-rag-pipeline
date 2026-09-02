@@ -13,75 +13,37 @@ from backend.app.models import Base, CVDocument, CVChunk, CVProcessingTrace
 
 logger = logging.getLogger("cv_rag_pipeline.db")
 
-# Try importing pgvector asyncpg codec registration
-try:
-    from pgvector.asyncpg import register_vector as _register_vector
-    _HAS_PGVECTOR = True
-except ImportError:
-    _HAS_PGVECTOR = False
-    logger.warning("pgvector.asyncpg not available; vector codec will not be registered.")
 
-
-async def _register_vector_codec(raw_conn):
-    """Coroutine that registers the pgvector codec on a raw asyncpg connection."""
-    if _HAS_PGVECTOR:
-        try:
-            await _register_vector(raw_conn)
-        except Exception as exc:
-            logger.debug(f"pgvector codec registration skipped: {exc}")
-
-
-# Create asynchronous SQLAlchemy engine
 def get_engine(db_url: Optional[str] = None) -> AsyncEngine:
+    """Creates an async SQLAlchemy engine for PostgreSQL (asyncpg) or SQLite (aiosqlite)."""
     url = db_url or settings.SUPABASE_DB_URL
     if not url:
         url = "sqlite+aiosqlite:///./cv_pipeline.db"
 
-    connect_args: dict = {}
     if "sqlite" in url:
-        connect_args["check_same_thread"] = False
         return create_async_engine(
             url,
             echo=False,
-            connect_args=connect_args,
+            connect_args={"check_same_thread": False},
         )
 
-    # For asyncpg: register the pgvector codec on every new connection via
-    # the async_creator / init callback so it runs in the correct async context.
+    # PostgreSQL via asyncpg.
+    # NOTE: We intentionally do NOT register the pgvector asyncpg codec here.
+    # The pipeline uses raw SQL with CAST(:embedding AS vector) instead of the
+    # ORM Vector column, so no codec is needed for INSERT.  The codec hook via
+    # run_async is unreliable on free-tier Render/Supabase pooled connections
+    # and was the root cause of the recurring DataError.
     return create_async_engine(
         url,
         echo=False,
         pool_size=5,
         max_overflow=10,
         pool_pre_ping=True,
-        # asyncpg-specific: called with the raw asyncpg connection after connect
         connect_args={"server_settings": {"jit": "off"}},
     )
 
 
 engine: AsyncEngine = get_engine()
-
-
-async def _on_connect(dbapi_conn, connection_record):
-    """SQLAlchemy async pool event – registers pgvector codec on raw asyncpg connections."""
-    # dbapi_conn is a asyncpg Connection proxied by SQLAlchemy
-    await _register_vector_codec(dbapi_conn)
-
-
-# Register the async event using the asyncpg-aware hook
-try:
-    from sqlalchemy import event as _sa_event
-    @_sa_event.listens_for(engine.sync_engine, "connect")
-    def _sync_connect_hook(dbapi_connection, connection_record):
-        """Synchronous connect hook – runs the async codec registration via run_async."""
-        if _HAS_PGVECTOR and hasattr(dbapi_connection, "run_async"):
-            try:
-                dbapi_connection.run_async(_register_vector_codec)
-            except Exception as exc:
-                logger.debug(f"Could not register pgvector codec via run_async: {exc}")
-except Exception as hook_err:
-    logger.debug(f"Could not attach pgvector connect hook: {hook_err}")
-
 
 # Async session factory
 AsyncSessionFactory = async_sessionmaker(
@@ -123,3 +85,12 @@ async def init_db(target_engine: AsyncEngine = engine):
             logger.info("Database schema initialized successfully.")
     except Exception as e:
         logger.error(f"Error initializing database tables: {e}", exc_info=True)
+
+
+async def reset_db(target_engine: AsyncEngine = engine):
+    """Drops and recreates all tables. USE WITH CAUTION — deletes all data."""
+    async with target_engine.begin() as conn:
+        logger.warning("Dropping all database tables for reset...")
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database reset complete — all tables recreated.")

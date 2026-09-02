@@ -289,3 +289,26 @@ async def delete_cv(cv_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(doc)
     await db.commit()
     return {"status": "deleted", "id": cv_id, "message": f"CV document {cv_id} deleted successfully."}
+
+
+@router.delete(
+    "",
+    summary="Reset — delete ALL CV data",
+    description="Truncates cv_chunks, cv_processing_traces, and cv_documents tables. Use for a clean fresh start."
+)
+async def reset_all_cvs(db: AsyncSession = Depends(get_db)):
+    """Wipes all CV data in dependency order (chunks → traces → documents)."""
+    from sqlalchemy import text as _text
+    try:
+        await db.execute(_text("TRUNCATE TABLE cv_chunks, cv_processing_traces, cv_documents RESTART IDENTITY CASCADE;"))
+        await db.commit()
+        logger.info("Database reset: all CV data truncated.")
+        return {"status": "reset", "message": "All CV documents, chunks, and traces have been deleted."}
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"DB reset failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database reset failed: {str(e)}"
+        )
+
