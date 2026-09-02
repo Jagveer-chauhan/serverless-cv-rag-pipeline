@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from backend.app.db.session import get_db
 from backend.app.models.cv_document import CVDocument
 from backend.app.models.cv_chunk import CVChunk
+from backend.app.models.cv_processing_trace import CVProcessingTrace
 from backend.app.observability.tracer import PipelineTracer
 from backend.app.services.parser import extract_text_from_pdf
 from backend.app.services.chunker import chunk_cv_text, TextChunk
@@ -108,7 +109,7 @@ async def upload_cv(
     try:
         db.add(doc)
         await db.commit()
-        await db.refresh(doc)
+        await db.refresh(doc, attribute_names=["id", "filename", "file_size", "content_type", "status", "created_at", "updated_at"])
     except Exception as init_err:
         await db.rollback()
         logger.warning(f"Initial doc insert failed (possible missing tables), running init_db: {init_err}")
@@ -116,7 +117,7 @@ async def upload_cv(
         await init_db()
         db.add(doc)
         await db.commit()
-        await db.refresh(doc)
+        await db.refresh(doc, attribute_names=["id", "filename", "file_size", "content_type", "status", "created_at", "updated_at"])
 
     tracer = PipelineTracer(document_id=doc.id)
 
@@ -130,7 +131,7 @@ async def upload_cv(
             tracer=tracer
         )
 
-        chunk_count = len(updated_doc.chunks) if updated_doc.chunks else len(summary["stages"])
+        chunk_count = summary.get("stages", {}).get("chunking", {}).get("chunks_count", 1)
 
         return CVUploadResponse(
             document_id=updated_doc.id,
@@ -248,6 +249,12 @@ async def get_cv_detail(cv_id: str, db: AsyncSession = Depends(get_db)):
             detail=f"CV document '{cv_id}' not found."
         )
 
+    res_chunks = await db.execute(select(CVChunk).where(CVChunk.document_id == cv_id).order_by(CVChunk.chunk_index))
+    chunks_list = res_chunks.scalars().all()
+
+    res_traces = await db.execute(select(CVProcessingTrace).where(CVProcessingTrace.document_id == cv_id).order_by(CVProcessingTrace.start_time))
+    traces_list = res_traces.scalars().all()
+
     return CVDetailResponse(
         id=doc.id,
         filename=doc.filename,
@@ -258,8 +265,8 @@ async def get_cv_detail(cv_id: str, db: AsyncSession = Depends(get_db)):
         total_duration_ms=doc.total_duration_ms,
         raw_text=doc.raw_text,
         parsed_json=doc.parsed_json,
-        chunks=[c.to_dict() for c in doc.chunks],
-        traces=[t.to_dict() for t in doc.traces],
+        chunks=[c.to_dict() for c in chunks_list],
+        traces=[t.to_dict() for t in traces_list],
         created_at=doc.created_at.isoformat() if doc.created_at else None,
         updated_at=doc.updated_at.isoformat() if doc.updated_at else None,
     )
