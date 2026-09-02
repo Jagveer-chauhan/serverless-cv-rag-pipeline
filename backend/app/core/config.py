@@ -58,14 +58,30 @@ class Settings(BaseSettings):
     # Hugging Face Serverless Inference API - STRICTLY LOADED FROM .env
     HF_API_KEY: str = Field(default="", description="Hugging Face API token loaded strictly from .env")
     HF_MODEL_NAME: str = Field(default="google/gemma-3-4b-it", description="Model name loaded from .env")
-    HF_API_URL: str = "https://api-inference.huggingface.co/models/google/gemma-3-4b-it"
+    HF_BASE_URL: str = Field(default="https://api-inference.huggingface.co", description="Hugging Face base inference URL loaded from .env")
+    HF_API_URL: str = Field(default="", description="Optional direct custom LLM API URL loaded from .env")
+    HF_EMBEDDING_API_URL: str = Field(default="", description="Optional direct custom embedding API URL loaded from .env")
 
     # Embedding Model
-    EMBEDDING_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"
+    EMBEDDING_MODEL_NAME: str = Field(default="sentence-transformers/all-MiniLM-L6-v2", description="Embedding model name loaded from .env")
     EMBEDDING_DIM: int = 384
 
     # Keepalive Security - STRICTLY LOADED FROM .env
     KEEPALIVE_SECRET: str = Field(default="", description="Optional keepalive secret token from .env")
+
+    @property
+    def hf_llm_url(self) -> str:
+        """Dynamic LLM inference endpoint URL."""
+        if self.HF_API_URL and self.HF_API_URL.strip():
+            return self.HF_API_URL.strip()
+        return f"{self.HF_BASE_URL.rstrip('/')}/models/{self.HF_MODEL_NAME}"
+
+    @property
+    def hf_embedding_url(self) -> str:
+        """Dynamic Embedding inference endpoint URL."""
+        if self.HF_EMBEDDING_API_URL and self.HF_EMBEDDING_API_URL.strip():
+            return self.HF_EMBEDDING_API_URL.strip()
+        return f"{self.HF_BASE_URL.rstrip('/')}/models/{self.EMBEDDING_MODEL_NAME}"
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

@@ -18,7 +18,7 @@ def _call_hf_embeddings_api(texts: List[str]) -> Optional[List[List[float]]]:
     if not settings.HF_API_KEY or not texts:
         return None
 
-    url = f"https://api-inference.huggingface.co/models/{settings.EMBEDDING_MODEL_NAME}"
+    url = settings.hf_embedding_url
     headers = {
         "Authorization": f"Bearer {settings.HF_API_KEY}",
         "Content-Type": "application/json"

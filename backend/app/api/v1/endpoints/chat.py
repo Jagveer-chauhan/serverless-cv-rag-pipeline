@@ -71,7 +71,7 @@ async def generate_rag_sse_stream(
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    f"https://api-inference.huggingface.co/models/{model_name}",
+                    settings.hf_llm_url,
                     headers={"Authorization": f"Bearer {api_key}"},
                     json={
                         "inputs": prompt,
