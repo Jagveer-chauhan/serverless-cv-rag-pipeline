@@ -76,14 +76,28 @@ async def execute_cv_pipeline(
         async with tracer.trace_stage("vector_upsert"):
             for tc, emb in zip(text_chunks, embeddings):
                 embedding_data = emb
+
+                # Deserialise if the embedding arrived as a JSON string
                 if isinstance(embedding_data, str):
                     try:
                         embedding_data = json.loads(embedding_data)
                     except Exception:
                         embedding_data = []
 
-                # Force strict list of Python floats (removes string or numpy types)
-                clean_embedding = [float(x) for x in embedding_data] if embedding_data else None
+                # Convert to a strict Python list of floats
+                clean_floats: list = [float(x) for x in embedding_data] if embedding_data else []
+
+                # Format as a pgvector literal string '[f1,f2,...]'.
+                # asyncpg cannot automatically serialise a Python list into the
+                # PostgreSQL `vector` type unless the pgvector codec is registered
+                # on the connection.  Passing the canonical string representation
+                # lets PostgreSQL do the cast itself ($7::vector) and avoids the
+                # 'could not convert string to float' DataError on free-tier
+                # Supabase/asyncpg connections where codec registration is unreliable.
+                if clean_floats:
+                    embedding_value: object = f"[{','.join(str(v) for v in clean_floats)}]"
+                else:
+                    embedding_value = None
 
                 db_chunk = CVChunk(
                     document_id=doc.id,
@@ -91,7 +105,7 @@ async def execute_cv_pipeline(
                     section_name=tc.section_name,
                     content=tc.content,
                     token_count=tc.token_count,
-                    embedding=clean_embedding,
+                    embedding=embedding_value,
                     metadata_json=tc.metadata
                 )
                 db.add(db_chunk)

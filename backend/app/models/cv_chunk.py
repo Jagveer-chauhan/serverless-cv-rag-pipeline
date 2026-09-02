@@ -8,11 +8,18 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.app.models.base import Base
 from backend.app.core.config import settings
 
+# Track whether the native pgvector SQLAlchemy type is available.
+# When True  → embedding column uses Vector(dim); asyncpg handles the wire type.
+# When False → embedding column uses Text; we store the '[f1,f2,...]' string directly.
+PGVECTOR_AVAILABLE: bool = False
 try:
     from pgvector.sqlalchemy import Vector
     EMBEDDING_TYPE = Vector(settings.EMBEDDING_DIM)
+    PGVECTOR_AVAILABLE = True
 except Exception:
-    EMBEDDING_TYPE = JSON
+    # Fallback for SQLite / environments without pgvector installed.
+    # Text stores the canonical '[f1,f2,...]' string that PostgreSQL can cast.
+    EMBEDDING_TYPE = Text
 
 
 class CVChunk(Base):
