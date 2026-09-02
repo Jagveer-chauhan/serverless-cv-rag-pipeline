@@ -1,10 +1,15 @@
-# Production Dockerfile for Render Web Service
+# Production Dockerfile for Render Web Service (Optimized for 512MB RAM CPU)
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DEBIAN_FRONTEND=noninteractive \
-    PORT=8000
+    PORT=8000 \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    VECLIB_MAXIMUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1
 
 WORKDIR /app
 
@@ -18,10 +23,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Install CPU-only PyTorch to prevent downloading 2GB+ CUDA binaries and prevent OOM
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 # Copy and install python dependencies
 COPY backend/requirements.txt ./backend/requirements.txt
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
 
 # Copy application source code
 COPY backend/ ./backend/
@@ -33,5 +41,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Start FastAPI server on dynamic $PORT provided by Render
-CMD ["sh", "-c", "uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
+# Start FastAPI server on dynamic $PORT with 1 worker to strictly respect 512MB RAM limit
+CMD ["sh", "-c", "uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
