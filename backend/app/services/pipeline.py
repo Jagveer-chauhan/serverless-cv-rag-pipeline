@@ -84,20 +84,16 @@ async def execute_cv_pipeline(
                     except Exception:
                         embedding_data = []
 
-                # Convert to a strict Python list of floats
+                # Convert to a strict Python list of native floats.
+                # pgvector.sqlalchemy.Vector's bind_processor expects a list (or
+                # numpy array) — NOT a pre-formatted string.  Passing a string
+                # causes it to call len() on the string (~3403 chars) rather than
+                # counting the 384 float elements, producing the
+                # "expected 384 dimensions, not 3403" ValueError.
+                # The asyncpg pgvector codec registered in session.py handles the
+                # wire-format serialisation automatically.
                 clean_floats: list = [float(x) for x in embedding_data] if embedding_data else []
-
-                # Format as a pgvector literal string '[f1,f2,...]'.
-                # asyncpg cannot automatically serialise a Python list into the
-                # PostgreSQL `vector` type unless the pgvector codec is registered
-                # on the connection.  Passing the canonical string representation
-                # lets PostgreSQL do the cast itself ($7::vector) and avoids the
-                # 'could not convert string to float' DataError on free-tier
-                # Supabase/asyncpg connections where codec registration is unreliable.
-                if clean_floats:
-                    embedding_value: object = f"[{','.join(str(v) for v in clean_floats)}]"
-                else:
-                    embedding_value = None
+                embedding_value = clean_floats if clean_floats else None
 
                 db_chunk = CVChunk(
                     document_id=doc.id,
