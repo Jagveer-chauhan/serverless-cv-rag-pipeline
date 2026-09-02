@@ -34,8 +34,8 @@ class CVChunk(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     
-    # 384-dimensional vector embedding for pgvector cosine similarity search
-    embedding: Mapped[Optional[Any]] = mapped_column(EMBEDDING_TYPE, nullable=True)
+    # 384-dimensional vector embedding with deferred=True to prevent unnecessary fetching on standard SELECTs
+    embedding: Mapped[Optional[Any]] = mapped_column(EMBEDDING_TYPE, deferred=True, nullable=True)
     metadata_json: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(

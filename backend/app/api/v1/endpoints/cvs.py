@@ -146,6 +146,7 @@ async def upload_cv(
         )
 
     except Exception as e:
+        await db.rollback()
         logger.error(f"Failed to process CV '{file.filename}': {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

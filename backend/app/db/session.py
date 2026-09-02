@@ -1,7 +1,7 @@
 """Asynchronous database engine, session management, and dependencies."""
 import logging
 from typing import AsyncGenerator, Optional
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -37,6 +37,20 @@ def get_engine(db_url: Optional[str] = None) -> AsyncEngine:
 
 
 engine: AsyncEngine = get_engine()
+
+# Register pgvector codec for asyncpg connections
+try:
+    from pgvector.asyncpg import register_vector
+except ImportError:
+    register_vector = None
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def register_custom_types(dbapi_connection, connection_record):
+    """Registers asyncpg vector(384) decoder on every new database connection."""
+    if register_vector and hasattr(dbapi_connection, "run_async"):
+        dbapi_connection.run_async(lambda conn: register_vector(conn))
+
 
 # Async session factory
 AsyncSessionFactory = async_sessionmaker(
