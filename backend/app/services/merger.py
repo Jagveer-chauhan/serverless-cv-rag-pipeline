@@ -1,4 +1,5 @@
 """Deduplication and merge service for combining partial chunk JSON extractions into assignment schema."""
+import re
 import logging
 from typing import List, Dict, Any, Optional
 from backend.app.schemas.cv_schema import (
@@ -132,9 +133,13 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
                 if isinstance(p, dict):
                     heading = p.get("heading") or p.get("name") or "Projects"
                     content = p.get("content") or p.get("description") or str(p)
-                    merged_sections.append({"heading": heading, "content": content})
+                    heading = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", heading, flags=re.I).strip()
+                    content = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", content, flags=re.I).strip()
+                    if heading:
+                        merged_sections.append({"heading": heading, "content": content})
                 elif isinstance(p, str):
-                    merged_sections.append({"heading": "Projects", "content": p})
+                    clean_p = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", p, flags=re.I).strip()
+                    merged_sections.append({"heading": "Projects", "content": clean_p})
 
         # 8. Languages
         lang_list = extract.get("languages")
@@ -153,6 +158,11 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         inferred_data = extract.get("inferred")
         if inferred_data and isinstance(inferred_data, dict):
             merged_leadership.extend(inferred_data.get("leadership_signals", []))
+
+    # Clean up summary
+    if merged_summary:
+        merged_summary = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", merged_summary, flags=re.I).strip()
+        merged_summary = re.split(r"(?i)\n\s*(?:core\s+technical\s+skills|technical\s+skills|skills)\b", merged_summary)[0].strip()
 
     # Deduplicate Work Experience
     deduped_exp = _deduplicate_work_experience(merged_experience)
@@ -206,7 +216,15 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         career_objective="Seeking challenging engineering roles"
     )
 
-    sections_list = [CustomSection.model_validate(s) for s in merged_sections]
+    # Deduplicate custom sections by heading
+    deduped_sections = []
+    seen_sec_headings = set()
+    for s in merged_sections:
+        h = str(s.get("heading", "")).strip().lower()
+        if h and h not in seen_sec_headings:
+            seen_sec_headings.add(h)
+            deduped_sections.append(CustomSection.model_validate(s))
+
     candidate_obj = CandidateInfo.model_validate(merged_candidate) if merged_candidate else None
 
     return CVExtractionSchema(
@@ -218,9 +236,8 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         certifications=deduped_certs,
         derived=derived_insights,
         inferred=inferred_signals,
-        sections=sections_list,
+        sections=deduped_sections,
         raw_text=raw_text,
-        # confidence_scores computed dynamically by calculate_confidence_scores() in pipeline.py
     )
 
 
@@ -228,23 +245,36 @@ def _deduplicate_work_experience(items: List[Dict[str, Any]]) -> List[WorkExperi
     seen = {}
     invalid_titles = {"experience", "work experience", "professional experience", "employment", "career history", "work history"}
     for it in items:
-        company = str(it.get("company", "")).strip().lower()
-        title = str(it.get("title", it.get("position", ""))).strip().lower()
-        if title in invalid_titles and company in ("company", ""):
-            continue
-        key = (company, title)
+        company = str(it.get("company", "")).strip()
+        title = str(it.get("title", it.get("position", ""))).strip()
+
+        # Clean (Part X/Y)
+        company = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", company, flags=re.I).strip(" ,|")
+        title = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", title, flags=re.I).strip(" ,|")
+
+        if not title or title.lower() in invalid_titles:
+            if company.lower() in ("company", "") and not it.get("achievements") and not it.get("key_achievements"):
+                continue
+
+        if re.search(r"\(Part\s+\d+/\d+\)", title, re.I) or title.lower() in ("role", "professional"):
+            if company.lower() in ("company", "") and not it.get("achievements") and not it.get("key_achievements"):
+                continue
+
+        it["company"] = company or "Company"
+        it["title"] = title or "Role"
+        key = (company.lower(), title.lower())
+
         if key not in seen:
-            it["title"] = it.get("title") or it.get("position") or "Role"
             seen[key] = it
         else:
             existing = seen[key]
             curr_ach = existing.get("achievements", existing.get("key_achievements", []))
             new_ach = it.get("achievements", it.get("key_achievements", []))
-            existing["achievements"] = list(set(curr_ach + new_ach))
+            existing["achievements"] = list(dict.fromkeys(curr_ach + new_ach))
 
             curr_tech = existing.get("technologies", existing.get("technologies_used", []))
             new_tech = it.get("technologies", it.get("technologies_used", []))
-            existing["technologies"] = list(set(curr_tech + new_tech))
+            existing["technologies"] = list(dict.fromkeys(curr_tech + new_tech))
 
     res = []
     for val in seen.values():
@@ -257,10 +287,18 @@ def _deduplicate_work_experience(items: List[Dict[str, Any]]) -> List[WorkExperi
 def _deduplicate_education(items: List[Dict[str, Any]]) -> List[EducationItem]:
     seen = {}
     for it in items:
-        inst = str(it.get("institution", "")).strip().lower()
-        deg = str(it.get("degree", "")).strip().lower()
-        key = (inst, deg)
+        inst = str(it.get("institution", "")).strip()
+        deg = str(it.get("degree", "")).strip()
+        if not inst and not deg:
+            continue
+        if deg.lower() in ("degree / study", "degree") and inst.lower() in ("university", ""):
+            continue
+        if "relevant training" in deg.lower() or "certifications" in deg.lower():
+            continue
+        key = (inst.lower(), deg.lower())
         if key not in seen:
+            it["institution"] = inst or "University"
+            it["degree"] = deg or "Degree"
             seen[key] = it
     return [EducationItem.model_validate(val) for val in seen.values()]
 
@@ -268,7 +306,9 @@ def _deduplicate_education(items: List[Dict[str, Any]]) -> List[EducationItem]:
 def _deduplicate_by_name(items: List[Dict[str, Any]], key: str, model_cls: Any) -> List[Any]:
     seen = {}
     for it in items:
-        name_val = str(it.get(key, "")).strip().lower()
-        if name_val and name_val not in seen:
-            seen[name_val] = it
+        name_val = str(it.get(key, "")).strip()
+        name_val = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", name_val, flags=re.I).strip()
+        if name_val and name_val.lower() not in seen:
+            it[key] = name_val
+            seen[name_val.lower()] = it
     return [model_cls.model_validate(val) for val in seen.values()]

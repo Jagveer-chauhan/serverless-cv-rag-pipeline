@@ -5,12 +5,12 @@ from dataclasses import dataclass, field
 
 # Regex patterns matching standard resume section headings
 SECTION_HEADER_PATTERNS = [
-    (r"(?i)^(?:professional\s+summary|executive\s+summary|summary|profile|about\s+me|career\s+objective|objective|overview|personal\s+statement)\b", "SUMMARY"),
+    (r"(?i)^(?:professional\s+summary|executive\s+summary|career\s+summary|summary|profile|about\s+me|career\s+objective|objective|personal\s+statement)\b", "SUMMARY"),
     (r"(?i)^(?:work\s+experience|professional\s+experience|experience|employment\s+history|career\s+history|work\s+history|employment|experience\s*&\s*projects|career\s+highlights|relevant\s+experience)\b", "EXPERIENCE"),
+    (r"(?i)^(?:relevant\s+training\s*&\s*certifications|certifications\s*&\s*training|training\s*&\s*certifications|certifications|certificates|licenses\s*&\s*certifications|licenses|courses\s*&\s*certifications|accreditations|courses|training|relevant\s+training)\b", "CERTIFICATIONS"),
     (r"(?i)^(?:education\s*&\s*training|education\s*&\s*certifications|education|academic\s+background|academic\s+qualifications|academic\s+history|qualifications|degrees)\b", "EDUCATION"),
-    (r"(?i)^(?:technical\s+skills|technical\s+proficiencies|technical\s+toolbox|core\s+competencies|core\s+skills|areas\s+of\s+expertise|skills\s*&\s*expertise|skills\s*&\s*competencies|skills\s*&\s*abilities|skills\s*&\s*tools|skills|technologies|tools\s*&\s*technologies|tech\s+stack|proficiencies)\b", "SKILLS"),
-    (r"(?i)^(?:projects|key\s+projects|selected\s+projects|personal\s+projects|notable\s+projects|portfolio\s+projects)\b", "PROJECTS"),
-    (r"(?i)^(?:certifications|certificates|licenses\s*&\s*certifications|licenses|courses\s*&\s*certifications|accreditations)\b", "CERTIFICATIONS"),
+    (r"(?i)^(?:core\s+technical\s+skills|technical\s+skills|technical\s+proficiencies|technical\s+toolbox|core\s+competencies|core\s+skills|areas\s+of\s+expertise|skills\s*&\s*expertise|skills\s*&\s*competencies|skills\s*&\s*abilities|skills\s*&\s*tools|skills|technologies|tools\s*&\s*technologies|tech\s+stack|proficiencies)\b", "SKILLS"),
+    (r"(?i)^(?:key\s+projects|projects|selected\s+projects|personal\s+projects|notable\s+projects|portfolio\s+projects|major\s+projects|project\s+experience)\b", "PROJECTS"),
     (r"(?i)^(?:publications|research|papers|patents\s*&\s*publications|patents)\b", "PUBLICATIONS"),
     (r"(?i)^(?:awards\s*&\s*honors|awards|honors|achievements|accolades)\b", "AWARDS"),
     (r"(?i)^(?:languages|language\s+proficiency|known\s+languages)\b", "LANGUAGES"),
