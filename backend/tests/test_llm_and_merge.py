@@ -160,3 +160,71 @@ def test_merge_arbitrary_skill_dictionaries():
     assert "FastAPI" in merged.skills.explicit
     assert "PostgreSQL" in merged.skills.explicit
     assert "Leadership" in merged.skills.soft_skills
+
+
+def test_multi_page_project_merging():
+    # Chunk 1 (Part 1/2 of Projects)
+    chunk1 = {
+        "projects": [
+            {
+                "name": "ERP System",
+                "role": "Lead Architect",
+                "technologies": ["PostgreSQL", "React"],
+                "description": "Overview: ERP for institutional management.\nStudent Workflows: Managed enrollments."
+            },
+            {
+                "name": "CBFC Government Portal",
+                "role": "Lead Developer",
+                "technologies": ["PHP", "Laravel"],
+                "description": "Overview: Public film certification portal.\nSecurity: STQC certified."
+            }
+        ]
+    }
+
+    # Chunk 2 (Part 2/2 of Projects - continuation + subsequent projects)
+    chunk2 = {
+        "projects": [
+            {
+                "name": "__CONTINUATION__",
+                "description": "Stakeholder Management: Technical liaison with government."
+            },
+            {
+                "name": "Live Composer",
+                "role": "Core Developer",
+                "technologies": ["WordPress", "PHP 8"],
+                "description": "State Management: Undo/Redo engine."
+            }
+        ]
+    }
+
+    merged = merge_extracted_chunks([chunk1, chunk2])
+    assert len(merged.projects) == 3
+    
+    # Verify continuation was appended to CBFC Portal
+    cbfc = next(p for p in merged.projects if "CBFC" in p.name)
+    assert "Stakeholder Management" in cbfc.description
+    assert "Security: STQC certified." in cbfc.description
+
+    # Verify Live Composer was added
+    live_comp = next(p for p in merged.projects if "Live Composer" in p.name)
+    assert live_comp.role == "Core Developer"
+
+
+def test_custom_section_project_routing_on_next_pages():
+    # Model extracted projects as custom sections on page 2
+    chunk = {
+        "sections": [
+            {
+                "heading": "Selected Projects (Page 2)",
+                "content": "CBFC Mobile Application | Solo Backend Developer\nArchitected central RESTful APIs for iOS & Android.\n\nJobIQ | Lead Developer\nJob portal for freshers."
+            }
+        ]
+    }
+
+    merged = merge_extracted_chunks([chunk])
+    assert len(merged.projects) >= 2
+    p_names = [p.name for p in merged.projects]
+    assert any("CBFC" in name for name in p_names)
+    assert any("JobIQ" in name for name in p_names)
+    assert len(merged.sections) == 0
+

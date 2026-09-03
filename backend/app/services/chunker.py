@@ -3,18 +3,18 @@ import re
 from typing import List, Dict, Any
 from dataclasses import dataclass, field
 
-# Regex patterns matching standard resume section headings
+# Regex patterns matching standard resume section headings (strictly anchored to prevent matching inline text)
 SECTION_HEADER_PATTERNS = [
-    (r"(?i)^(?:professional\s+summary|executive\s+summary|career\s+summary|summary\s+of\s+qualifications|profile\s+summary|career\s+profile|about\s+me|about|career\s+objective|objective|personal\s+statement|summary|profile)\b", "SUMMARY"),
-    (r"(?i)^(?:work\s+experience|professional\s+experience|employment\s+history|career\s+history|work\s+history|employment|experience\s*&\s*projects|career\s+highlights|relevant\s+experience|work\s+background|professional\s+background|professional\s+journey|internships?|internship\s+experience|experience)\b", "EXPERIENCE"),
-    (r"(?i)^(?:relevant\s+training\s*&\s*certifications|certifications\s*&\s*training|training\s*&\s*certifications|certifications\s*&\s*licenses|licenses\s*&\s*certifications|courses\s*&\s*certifications|accreditations|certifications|certificates|licenses|licensures|courses|relevant\s+training|credentials|professional\s+certifications|training)\b", "CERTIFICATIONS"),
-    (r"(?i)^(?:education\s*&\s*training|education\s*&\s*certifications|education\s*&\s*qualifications|academic\s+background|academic\s+qualifications|academic\s+history|academic\s+credentials|educational\s+background|qualifications|education|academics|degrees)\b", "EDUCATION"),
-    (r"(?i)^(?:core\s+technical\s+skills|technical\s+skills|technical\s+proficiencies|technical\s+toolbox|technical\s+expertise|core\s+competencies|core\s+skills|areas\s+of\s+expertise|skills\s*&\s*expertise|skills\s*&\s*competencies|skills\s*&\s*abilities|skills\s*&\s*tools|skills\s*/\s*tools|skills\s*&\s*frameworks|key\s+skills|it\s+skills|technologies|tools\s*&\s*technologies|tech\s+stack|technological\s+skills|skills|proficiencies|competencies)\b", "SKILLS"),
-    (r"(?i)^(?:key\s+projects|projects\s*&\s*contributions|projects\s*&\s*portfolio|selected\s+projects|personal\s+projects|notable\s+projects|portfolio\s+projects|major\s+projects|project\s+experience|academic\s+projects|software\s+projects|technical\s+projects|client\s+projects|live\s+projects|freelance\s+projects|systems?\s+developed|products?\s+developed|key\s+systems|key\s+highlights|projects|portfolio|open\s+source(?:\s+contributions)?)\b", "PROJECTS"),
-    (r"(?i)^(?:publications\s*&\s*research|research\s*&\s*publications|research\s+papers|patents\s*&\s*publications|journals\s*&\s*conferences|publications|research|papers|patents)\b", "PUBLICATIONS"),
-    (r"(?i)^(?:awards\s*&\s*honors|awards\s*&\s*achievements|honors\s*&\s*awards|accomplishments|accolades|fellowships?|awards|honors|achievements)\b", "AWARDS"),
-    (r"(?i)^(?:languages\s+known|language\s+proficiencies|language\s+proficiency|known\s+languages|spoken\s+languages|languages)\b", "LANGUAGES"),
-    (r"(?i)^(?:volunteer\s+experience|volunteering|volunteer\s+work|extracurricular\s+activities|extracurricular|interests|hobbies\s*&\s*interests|leadership\s+activities|activities|volunteer|hobbies|leadership)\b", "ADDITIONAL"),
+    (r"(?i)^(?:professional\s+summary|executive\s+summary|career\s+summary|summary\s+of\s+qualifications|profile\s+summary|career\s+profile|about\s+me|about|career\s+objective|objective|personal\s+statement|summary|profile)(?:\s*\(.*?\))?[:\s\-–—]*$", "SUMMARY"),
+    (r"(?i)^(?:work\s+experience|professional\s+experience|employment\s+history|career\s+history|work\s+history|employment|experience\s*&\s*projects|career\s+highlights|relevant\s+experience|work\s+background|professional\s+background|professional\s+journey|internships?|internship\s+experience|industry\s+experience|experience)(?:\s*\(.*?\))?[:\s\-–—]*$", "EXPERIENCE"),
+    (r"(?i)^(?:relevant\s+training\s*&\s*certifications|certifications\s*&\s*training|training\s*&\s*certifications|certifications\s*&\s*licenses|licenses\s*&\s*certifications|courses\s*&\s*certifications|accreditations|certifications|certificates|licenses|licensures|courses|relevant\s+training|credentials|professional\s+certifications|training)(?:\s*\(.*?\))?[:\s\-–—]*$", "CERTIFICATIONS"),
+    (r"(?i)^(?:education\s*&\s*training|education\s*&\s*certifications|education\s*&\s*qualifications|academic\s+background|academic\s+qualifications|academic\s+history|academic\s+credentials|educational\s+background|qualifications|education|academics|degrees)(?:\s*\(.*?\))?[:\s\-–—]*$", "EDUCATION"),
+    (r"(?i)^(?:core\s+technical\s+skills|technical\s+skills|technical\s+proficiencies|technical\s+toolbox|technical\s+expertise|core\s+competencies|core\s+skills|areas\s+of\s+expertise|skills\s*&\s*expertise|skills\s*&\s*competencies|skills\s*&\s*abilities|skills\s*&\s*tools|skills\s*/\s*tools|skills\s*&\s*frameworks|key\s+skills|it\s+skills|technologies|tools\s*&\s*technologies|tech\s+stack|technological\s+skills|skills|proficiencies|competencies)(?:\s*\(.*?\))?[:\s\-–—]*$", "SKILLS"),
+    (r"(?i)^(?:key\s+projects(?:\s*&\s*(?:contributions|portfolio|achievements|highlights))?|projects\s*&\s*(?:contributions|portfolio|achievements|highlights|systems)|selected\s+projects|personal\s+projects|notable\s+projects|portfolio\s+projects|major\s+projects(?:\s*&\s*systems(?:\s+developed)?)?|project\s+experience|academic\s+projects|software\s+projects|technical\s+projects|client\s+projects|live\s+projects|freelance\s+projects|systems?\s+developed|products?\s+developed|key\s+systems|key\s+highlights|projects\s*&\s*highlights|projects\s+undertaken|representative\s+projects|recent\s+projects|project\s+work|projects|portfolio|open\s+source(?:\s+contributions)?)(?:\s*\(.*?\))?[:\s\-–—]*$", "PROJECTS"),
+    (r"(?i)^(?:publications\s*&\s*research|research\s*&\s*publications|research\s+papers|patents\s*&\s*publications|journals\s*&\s*conferences|publications|research|papers|patents)(?:\s*\(.*?\))?[:\s\-–—]*$", "PUBLICATIONS"),
+    (r"(?i)^(?:awards\s*&\s*honors|awards\s*&\s*achievements|honors\s*&\s*awards|accomplishments|accolades|fellowships?|awards|honors|achievements)(?:\s*\(.*?\))?[:\s\-–—]*$", "AWARDS"),
+    (r"(?i)^(?:languages\s+known|language\s+proficiencies|language\s+proficiency|known\s+languages|spoken\s+languages|languages)(?:\s*\(.*?\))?[:\s\-–—]*$", "LANGUAGES"),
+    (r"(?i)^(?:volunteer\s+experience|volunteering|volunteer\s+work|extracurricular\s+activities|extracurricular|interests|hobbies\s*&\s*interests|leadership\s+activities|activities|volunteer|hobbies|leadership)(?:\s*\(.*?\))?[:\s\-–—]*$", "ADDITIONAL"),
 ]
 
 MAX_CHUNK_CHAR_SIZE = 2500  # ~500-600 tokens (optimal for multi-page CV section continuity)
@@ -70,12 +70,15 @@ def chunk_cv_text(raw_text: str) -> List[TextChunk]:
 
         # Check if line matches a known section header
         matched_section = None
-        # Headers are usually short (< 70 chars) and standalone or formatted
-        if len(stripped) < 70:
-            # Strip markdown (#, *), bullet markers, numbers ("1. ", "II. "), and trailing colons
+        # Headers are short (< 60 chars) and standalone
+        is_bullet = bool(re.match(r"^[-•*–—\t]\s*", stripped))
+        if not is_bullet and len(stripped) < 60:
+            # Strip markdown (#, *), bullet markers, numbers ("1. ", "II. "), and trailing colons/dashes
             clean_line = re.sub(r"^[\s#*_\-–—]+|[\s:*_\-–—]+$", "", stripped).strip()
             clean_line = re.sub(r"^(?:[0-9]+|[A-Za-z]|[IVXLCDM]+)[\.\)\-]\s*", "", clean_line).strip()
             clean_line = re.sub(r"^[\s#*_\-–—]+|[\s:*_\-–—]+$", "", clean_line).strip()
+
+            # Ensure this is not a property line with inline content (e.g. "Technologies: React, Node...")
             for pattern, sec_name in SECTION_HEADER_PATTERNS:
                 if re.match(pattern, clean_line):
                     matched_section = sec_name

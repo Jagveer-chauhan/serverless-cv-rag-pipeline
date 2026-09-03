@@ -45,7 +45,10 @@ Strict JSON format rules:
   - languages: [{"language": str, "proficiency": str}]
   - sections: [{"heading": str, "content": str}]
 
-Extract whatever fields are present in the text excerpt. If a field is not present in the excerpt, omit it or use an empty list."""
+Multi-page & Section Handling Rules:
+- When extracting project sections (including excerpts on subsequent pages or continuation parts labeled [PROJECTS]), ALWAYS extract projects into the `projects` list, NEVER into custom `sections`.
+- For projects with sub-sections or labeled points (such as Overview, Architecture, Key Features, Stakeholder Management, Security, Performance), consolidate all of them into the project's `description`.
+- Extract whatever fields are present in the text excerpt. If a field is not present in the excerpt, omit it or use an empty list."""
 
 
 def clean_json_response(raw_text: str) -> str:
@@ -909,6 +912,21 @@ class LLMExtractor:
             sec_heading = section.replace("_", " ").title()
             clean_text = re.sub(r"^\[.*?]\s*", "", content).strip()
             clean_text = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", clean_text, flags=re.I).strip()
+            
+            # Check if this fallback section is actually a project section
+            if (
+                any(kw in sec_heading.lower() for kw in ["project", "portfolio", "system", "application", "app"])
+                or (len(clean_text) > 40 and any(kw in clean_text.lower() for kw in ["developer", "architected", "developed", "cbfc", "jobiq", "composer", "live composer", "django", "laravel", "portal", "lms"]))
+            ):
+                clean_chunk = TextChunk(
+                    chunk_index=chunk.chunk_index,
+                    section_name="PROJECTS",
+                    content=f"[PROJECTS]\n{clean_text}",
+                    token_count=chunk.token_count,
+                    metadata=chunk.metadata
+                )
+                return self._heuristic_chunk_extraction(clean_chunk)
+            
             data["sections"] = [{"heading": sec_heading, "content": clean_text}]
 
         return data

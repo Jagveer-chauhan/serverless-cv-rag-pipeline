@@ -47,3 +47,54 @@ def test_chunk_cv_text_sections():
 def test_empty_cv_chunking():
     chunks = chunk_cv_text("")
     assert chunks == []
+
+
+def test_chunker_avoids_false_positive_section_splits_inside_projects():
+    raw_cv = """
+    Jane Doe
+    jane@example.com
+
+    SUMMARY
+    Senior Engineer.
+
+    SELECTED PROJECTS
+
+    Institute Management ERP | Lead Architect
+    Overview: Designed ERP for universities.
+    Technologies: PHP, Laravel, PostgreSQL, Docker
+    Key Highlights: Delivered on time with zero downtime.
+    Activities: Coordinated sprint planning.
+    Training: Conducted onboarding sessions.
+
+    Tracked.ai - Learning Management System | Full-Stack Developer
+    Overview: Australian LMS platform.
+    Experience with real-time sockets and WebSockets.
+    """
+    chunks = chunk_cv_text(raw_cv)
+    section_names = [c.section_name for c in chunks]
+
+    # Should NOT have SKILLS, CERTIFICATIONS, ADDITIONAL, or duplicate EXPERIENCE created from inline bullets!
+    assert "SKILLS" not in section_names
+    assert "CERTIFICATIONS" not in section_names
+    assert "ADDITIONAL" not in section_names
+    assert "PROJECTS" in section_names
+
+
+def test_chunker_handles_multi_page_project_continuation_headers():
+    raw_cv = """
+    John Developer
+    john@example.com
+
+    PROJECTS (PAGE 1)
+    Project A | Developer
+    Built service A.
+
+    PROJECTS (CONTINUED)
+    Project B | Developer
+    Built service B.
+    """
+    chunks = chunk_cv_text(raw_cv)
+    for c in chunks:
+        if c.section_name != "CONTACT_HEADER":
+            assert c.section_name == "PROJECTS"
+

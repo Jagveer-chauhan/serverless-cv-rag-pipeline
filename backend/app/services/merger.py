@@ -259,14 +259,33 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         c = str(s.get("content", "")).strip()
         h_lower = h.lower()
         is_proj = (
-            any(kw in h_lower for kw in ["project", "system", "portal", "platform", "app", "cbfc", "jobiq", "composer"])
-            or (len(h) < 60 and any(kw in c.lower() for kw in ["developer for", "implemented", "built", "architected", "sole backend"]))
+            any(kw in h_lower for kw in ["project", "system", "portal", "platform", "app", "cbfc", "jobiq", "composer", "portfolio"])
+            or (len(h) < 70 and any(kw in c.lower() for kw in ["developer for", "implemented", "built", "architected", "sole backend", "developed", "tech stack:"]))
         )
         if is_proj:
-            merged_projects.append({
-                "name": h,
-                "description": c
-            })
+            # Check if this section contains multiple projects or is a generic project header
+            is_generic_proj = any(h_lower.startswith(kw) for kw in ["project", "selected project", "key project", "notable project", "academic project", "personal project", "portfolio"])
+            if is_generic_proj and len(c) > 100:
+                # Extract multiple project items from content
+                from backend.app.services.chunker import TextChunk
+                from backend.app.services.llm_extractor import LLMExtractor
+                fake_chunk = TextChunk(
+                    chunk_index=0,
+                    section_name="PROJECTS",
+                    content=f"[PROJECTS]\n{c}",
+                    token_count=len(c.split())
+                )
+                extracted = LLMExtractor()._heuristic_chunk_extraction(fake_chunk)
+                sub_projs = extracted.get("projects", [])
+                if sub_projs:
+                    merged_projects.extend(sub_projs)
+                else:
+                    merged_projects.append({"name": h, "description": c})
+            else:
+                merged_projects.append({
+                    "name": h,
+                    "description": c
+                })
         else:
             remaining_sections.append(s)
 
@@ -351,31 +370,44 @@ def _deduplicate_projects(items: List[Dict[str, Any]]) -> List[ProjectItem]:
     for it in items:
         name = str(it.get("name", "")).strip()
         name = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", name, flags=re.I).strip(" ,|–—-")
+        role = it.get("role")
+        tech = it.get("technologies") or it.get("technologies_used") or []
+        links = it.get("links") or ([it["link"]] if it.get("link") else [])
+        desc = it.get("description") or it.get("content") or ""
+
         if not name or name.lower() in ("key projects", "selected projects", "projects", "project", "__continuation__"):
-            if seen and (it.get("description") or it.get("technologies")):
+            if seen and desc:
                 last_key = list(seen.keys())[-1]
                 last_proj = seen[last_key]
                 curr_tech = last_proj.get("technologies", [])
-                new_tech = it.get("technologies", [])
-                last_proj["technologies"] = list(dict.fromkeys(curr_tech + new_tech))
-                if it.get("description") and it["description"] not in last_proj.get("description", ""):
-                    last_proj["description"] = f"{last_proj.get('description', '')}\n{it['description']}".strip()
+                last_proj["technologies"] = list(dict.fromkeys(curr_tech + tech))
+                if desc and desc not in last_proj.get("description", ""):
+                    last_proj["description"] = f"{last_proj.get('description', '')}\n{desc}".strip()
                 continue
-            elif not it.get("description") and not it.get("technologies"):
+            elif not desc and not tech:
                 continue
+
         key = name.lower()
         if key not in seen:
             it["name"] = name or "Project"
+            it["role"] = role
+            it["technologies"] = list(dict.fromkeys(tech))
+            it["links"] = list(dict.fromkeys(links))
+            it["description"] = desc
             seen[key] = it
         else:
             existing = seen[key]
+            if role and not existing.get("role"):
+                existing["role"] = role
             curr_tech = existing.get("technologies", [])
-            new_tech = it.get("technologies", [])
-            existing["technologies"] = list(dict.fromkeys(curr_tech + new_tech))
-            if it.get("description") and not existing.get("description"):
-                existing["description"] = it["description"]
-            elif it.get("description") and existing.get("description") and it["description"] not in existing["description"]:
-                existing["description"] = f"{existing['description']}\n{it['description']}"
+            existing["technologies"] = list(dict.fromkeys(curr_tech + tech))
+            curr_links = existing.get("links", [])
+            existing["links"] = list(dict.fromkeys(curr_links + links))
+            if desc and not existing.get("description"):
+                existing["description"] = desc
+            elif desc and existing.get("description") and desc not in existing["description"]:
+                existing["description"] = f"{existing['description']}\n{desc}".strip()
+
     return [ProjectItem.model_validate(val) for val in seen.values()]
 
 
