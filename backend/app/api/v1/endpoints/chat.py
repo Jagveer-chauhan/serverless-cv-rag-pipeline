@@ -78,44 +78,41 @@ async def generate_rag_sse_stream(
 
     prompt = f"{RAG_SYSTEM_PROMPT}\n\n[CV CONTEXT]:\n{context_text}\n\n[USER QUESTION]:\n{query}\n\n[ASSISTANT ANSWER]:"
 
-    # If HF API key is available, call HF streaming / completion
+    # If HF API key is available, call HF AsyncInferenceClient streaming
     if api_key:
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    settings.hf_llm_url,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    json={
-                        "inputs": prompt,
-                        "parameters": {
-                            "max_new_tokens": 512,
-                            "temperature": 0.2,
-                            "return_full_text": False
-                        }
-                    }
-                )
-                if response.status_code == 200:
-                    res_json = response.json()
-                    full_reply = ""
-                    if isinstance(res_json, list) and len(res_json) > 0:
-                        full_reply = res_json[0].get("generated_text", "")
-                    elif isinstance(res_json, dict):
-                        full_reply = res_json.get("generated_text", "")
+            from huggingface_hub import AsyncInferenceClient
+            hf_client = AsyncInferenceClient(api_key=api_key)
 
-                    # Stream tokens in fast batches for realistic responsive SSE stream
-                    words = full_reply.split(" ")
-                    for i, word in enumerate(words):
-                        chunk_token = word + (" " if i < len(words) - 1 else "")
-                        yield f"event: token\ndata: {json.dumps({'token': chunk_token})}\n\n"
-                        await asyncio.sleep(0.015)
-                else:
-                    # Fallback on non-200 HF response
-                    fallback_reply = _generate_heuristic_answer(query, chunks)
-                    for word in fallback_reply.split(" "):
-                        yield f"event: token\ndata: {json.dumps({'token': word + ' '})}\n\n"
-                        await asyncio.sleep(0.015)
+            messages = [
+                {"role": "system", "content": RAG_SYSTEM_PROMPT},
+            ]
+            for m in (chat_history or [])[-4:]:
+                messages.append({"role": m.role, "content": m.content})
+
+            user_msg = (
+                f"[CANDIDATE CV CONTEXT]:\n{context_text}\n\n"
+                f"[USER QUESTION]:\n{query}\n\n"
+                f"Please provide an accurate, helpful, and professional response using ONLY the candidate CV context above:"
+            )
+            messages.append({"role": "user", "content": user_msg})
+
+            stream = await hf_client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=600,
+                temperature=0.2,
+                stream=True
+            )
+
+            async for chunk_resp in stream:
+                if chunk_resp.choices and len(chunk_resp.choices) > 0:
+                    delta = chunk_resp.choices[0].delta
+                    if delta and delta.content:
+                        yield f"event: token\ndata: {json.dumps({'token': delta.content})}\n\n"
+
         except Exception as e:
-            logger.warning(f"HF streaming failed, using fallback: {e}")
+            logger.warning(f"HF AsyncInferenceClient streaming failed, using fallback: {e}")
             fallback_reply = _generate_heuristic_answer(query, chunks)
             for word in fallback_reply.split(" "):
                 yield f"event: token\ndata: {json.dumps({'token': word + ' '})}\n\n"
@@ -132,16 +129,36 @@ async def generate_rag_sse_stream(
 
 
 def _generate_heuristic_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
+    import re
     if not chunks:
         return "I could not find any relevant information in the uploaded CV documents regarding your question."
-    
-    top_chunk = chunks[0]
-    return (
-        f"Based on the candidate's resume (specifically the **{top_chunk['section_name']}** section with "
-        f"{top_chunk['similarity']*100:.1f}% relevance):\n\n"
-        f"{top_chunk['content']}\n\n"
-        f"This directly addresses your query regarding *'{query}'*."
-    )
+
+    sections: Dict[str, List[str]] = {}
+    for c in chunks:
+        sec = c.get("section_name", "GENERAL")
+        raw_text = c.get("content", "").strip()
+        clean_text = re.sub(r"^\[.*?\]\s*", "", raw_text)
+        if sec not in sections:
+            sections[sec] = []
+        sections[sec].append(clean_text)
+
+    ans_lines = [
+        f"Here is the candidate intelligence found regarding **\"{query}\"**:\n"
+    ]
+
+    for sec, contents in sections.items():
+        ans_lines.append(f"**{sec.replace('_', ' ').title()} Details:**")
+        for text in contents:
+            for line in text.splitlines():
+                line = line.strip()
+                if line and not line.upper() == sec:
+                    if line.startswith(("-", "•", "*")):
+                        ans_lines.append(f"- {line.lstrip('-•* ')}")
+                    else:
+                        ans_lines.append(f"- {line}")
+        ans_lines.append("")
+
+    return "\n".join(ans_lines)
 
 
 @router.post(

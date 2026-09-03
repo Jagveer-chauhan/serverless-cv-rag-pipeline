@@ -97,85 +97,61 @@ class LLMExtractor:
         chunk: TextChunk,
         max_retries: int = 2
     ) -> Dict[str, Any]:
-        """Extracts structured JSON from a single chunk with schema validation retry loop."""
+        """Extracts structured JSON from a single chunk using AsyncInferenceClient with fallback."""
         if not self.api_key:
             return self._heuristic_chunk_extraction(chunk)
 
-        client = await self.get_client()
-        prompt = f"{EXTRACTION_SYSTEM_PROMPT}\n\n[RESUME SECTION EXCERPT]:\n{chunk.content}\n\n[OUTPUT JSON]:"
+        try:
+            from huggingface_hub import AsyncInferenceClient
+            hf_client = AsyncInferenceClient(api_key=self.api_key)
 
-        for attempt in range(max_retries + 1):
-            t_start = time.perf_counter()
-            try:
-                response = await client.post(
-                    self.api_url,
-                    json={
-                        "inputs": prompt,
-                        "parameters": {
-                            "max_new_tokens": 1024,
-                            "temperature": 0.1,
-                            "return_full_text": False
-                        },
-                        "options": {"wait_for_model": True}
-                    }
-                )
+            system_msg = (
+                f"{EXTRACTION_SYSTEM_PROMPT}\n\n"
+                f"You MUST output ONLY a valid JSON object matching the resume schema."
+            )
+            user_msg = (
+                f"[RESUME SECTION EXCERPT]:\n{chunk.content}\n\n"
+                f"Extract candidate info, work experience, education, skills, projects, certifications as JSON:"
+            )
 
-                inference_ms = round((time.perf_counter() - t_start) * 1000, 2)
-                # Record cold-start vs warm inference in app state
-                app_state.record_inference(inference_ms)
-
-                if response.status_code == 503:
-                    # Model is loading — this is a cold start on the HF side
-                    logger.info(f"HF model loading (cold start) for chunk {chunk.chunk_index}, waiting...")
-                    await asyncio.sleep(10)
-                    continue
-
-                if response.status_code != 200:
-                    logger.warning(f"HF API returned status {response.status_code}: {response.text[:200]}")
-                    return self._heuristic_chunk_extraction(chunk)
-
-                res_json = response.json()
-                if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
-                    generated_text = res_json[0]["generated_text"]
-                elif isinstance(res_json, dict) and "generated_text" in res_json:
-                    generated_text = res_json["generated_text"]
-                else:
-                    generated_text = str(res_json)
-
-                clean_text = clean_json_response(generated_text)
-                parsed_data = json.loads(clean_text)
-
-                if not isinstance(parsed_data, dict):
-                    raise ValueError(f"Expected JSON object, got {type(parsed_data)}")
-
-                ChunkExtractionSchema.model_validate(parsed_data)
-                return parsed_data
-
-            except (json.JSONDecodeError, ValidationError, ValueError) as val_err:
-                self._retry_count += 1
-                logger.warning(
-                    f"Chunk {chunk.chunk_index} validation failed "
-                    f"(attempt {attempt + 1}/{max_retries + 1}): {val_err}"
-                )
-                if attempt < max_retries:
-                    prompt = (
-                        f"{EXTRACTION_SYSTEM_PROMPT}\n\n"
-                        f"[RESUME SECTION EXCERPT]:\n{chunk.content}\n\n"
-                        f"CRITICAL ERROR: Your previous response was invalid with error:\n{str(val_err)}\n"
-                        f"Fix the error and output ONLY the valid JSON object:\n\n[OUTPUT JSON]:"
+            for attempt in range(max_retries + 1):
+                t_start = time.perf_counter()
+                try:
+                    res = await hf_client.chat.completions.create(
+                        model=self.model_name,
+                        messages=[
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": user_msg}
+                        ],
+                        max_tokens=1024,
+                        temperature=0.1
                     )
-                else:
-                    logger.error(
-                        f"Exhausted validation retries on chunk {chunk.chunk_index}. "
-                        f"Falling back to heuristic."
+
+                    inference_ms = round((time.perf_counter() - t_start) * 1000, 2)
+                    app_state.record_inference(inference_ms)
+
+                    generated_text = res.choices[0].message.content or ""
+                    clean_text = clean_json_response(generated_text)
+                    parsed_data = json.loads(clean_text)
+
+                    if not isinstance(parsed_data, dict):
+                        raise ValueError(f"Expected JSON object, got {type(parsed_data)}")
+
+                    ChunkExtractionSchema.model_validate(parsed_data)
+                    return parsed_data
+
+                except (json.JSONDecodeError, ValidationError, ValueError) as val_err:
+                    self._retry_count += 1
+                    logger.warning(
+                        f"Chunk {chunk.chunk_index} validation failed "
+                        f"(attempt {attempt + 1}/{max_retries + 1}): {val_err}"
                     )
-                    return self._heuristic_chunk_extraction(chunk)
-            except Exception as e:
-                logger.error(
-                    f"Unexpected error in LLM extraction on chunk {chunk.chunk_index}: {e}",
-                    exc_info=True
-                )
-                return self._heuristic_chunk_extraction(chunk)
+                    if attempt >= max_retries:
+                        return self._heuristic_chunk_extraction(chunk)
+
+        except Exception as e:
+            logger.warning(f"AsyncInferenceClient failed for chunk {chunk.chunk_index}: {e}, using heuristic")
+            return self._heuristic_chunk_extraction(chunk)
 
         return self._heuristic_chunk_extraction(chunk)
 
