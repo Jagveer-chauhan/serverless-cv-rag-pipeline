@@ -121,19 +121,8 @@ async def generate_rag_sse_stream(
     model_name: str = settings.HF_MODEL_NAME
 ) -> AsyncGenerator[str, None]:
     """Asynchronous generator yielding Server-Sent Events (SSE) with citations and streaming tokens."""
-    # 1. Emit citations event
-    citations_data = [
-        {
-            "chunk_id": c["chunk_id"],
-            "section_name": c["section_name"],
-            "similarity": c["similarity"],
-            "snippet": c["content"][:250] + ("..." if len(c["content"]) > 250 else ""),
-        }
-        for c in chunks
-    ]
-    yield f"event: citations\ndata: {json.dumps({'citations': citations_data})}\n\n"
-
     if not chunks:
+        yield f"event: citations\ndata: {json.dumps({'citations': []})}\n\n"
         welcome_msg = (
             "Welcome! No candidate CVs have been ingested yet. "
             "Please click the **'Ingest New CV'** button on the left to upload a CV (e.g. from the `samples/` directory) "
@@ -145,14 +134,28 @@ async def generate_rag_sse_stream(
         yield f"event: done\ndata: {json.dumps({'status': 'complete', 'chunks_used': 0})}\n\n"
         return
 
-    # If the user query is a simple greeting, reply naturally with conversational guidance
+    # If the user query is a simple greeting, reply naturally with conversational guidance (no citations needed)
     if is_conversational_greeting(query):
+        yield f"event: citations\ndata: {json.dumps({'citations': []})}\n\n"
         greeting_text = _build_greeting_response(chunks)
         for word in greeting_text.split(" "):
             yield f"event: token\ndata: {json.dumps({'token': word + ' '})}\n\n"
             await asyncio.sleep(0.015)
-        yield f"event: done\ndata: {json.dumps({'status': 'complete', 'chunks_used': len(chunks)})}\n\n"
+        yield f"event: done\ndata: {json.dumps({'status': 'complete', 'chunks_used': 0})}\n\n"
         return
+
+    # 1. Filter and emit citations for relevant RAG chunks
+    relevant_chunks = [c for c in chunks if c.get("similarity", 0) >= 0.05]
+    citations_data = [
+        {
+            "chunk_id": c["chunk_id"],
+            "section_name": c["section_name"],
+            "similarity": round(c["similarity"], 3),
+            "snippet": c["content"][:250] + ("..." if len(c["content"]) > 250 else ""),
+        }
+        for c in (relevant_chunks or chunks)[:4]
+    ]
+    yield f"event: citations\ndata: {json.dumps({'citations': citations_data})}\n\n"
 
     # 2. Formulate RAG context
     context_text = "\n\n".join(

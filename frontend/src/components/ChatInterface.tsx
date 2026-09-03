@@ -16,6 +16,140 @@ const QUICK_PROMPTS = [
   'What leadership or architect roles did they hold?',
 ]
 
+function FormattedContent({ content }: { content: string }) {
+  if (!content) return null
+
+  // Split lines to format markdown headers, bullet points, bolding
+  const lines = content.split('\n')
+
+  return (
+    <div className="space-y-1 text-xs leading-relaxed">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim()
+        if (!trimmed) {
+          return <div key={idx} className="h-1.5" />
+        }
+
+        // Heading 3
+        if (trimmed.startsWith('### ')) {
+          return (
+            <h4 key={idx} className="font-semibold text-emerald-400 text-xs mt-2 pt-1 border-b border-slate-800/40 pb-0.5">
+              {trimmed.replace(/^###\s*/, '')}
+            </h4>
+          )
+        }
+
+        // Bullet point
+        if (trimmed.startsWith('- ') || trimmed.startsWith('• ') || trimmed.startsWith('* ')) {
+          const itemText = trimmed.replace(/^[-•*]\s*/, '')
+          return (
+            <div key={idx} className="flex items-start space-x-2 pl-1.5 text-slate-300">
+              <span className="text-emerald-500 font-bold text-xs mt-0.5">•</span>
+              <span className="flex-1">{renderBoldText(itemText)}</span>
+            </div>
+          )
+        }
+
+        // Standard line
+        return (
+          <p key={idx} className="text-slate-200">
+            {renderBoldText(trimmed)}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
+function renderBoldText(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*.*?\*\*)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={i} className="font-semibold text-white">
+          {part.slice(2, -2)}
+        </strong>
+      )
+    }
+    return part
+  })
+}
+
+function MessageBubble({ msg }: { msg: ChatMessage }) {
+  const [showCitations, setShowCitations] = useState(false)
+
+  const isUser = msg.role === 'user'
+
+  return (
+    <div className={`flex items-start space-x-3 text-xs ${isUser ? 'justify-end' : 'justify-start'}`}>
+      {!isUser && (
+        <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0 mt-0.5">
+          <Bot className="w-4 h-4" />
+        </div>
+      )}
+
+      <div
+        className={`max-w-[85%] rounded-2xl p-3.5 space-y-2.5 ${
+          isUser
+            ? 'bg-emerald-600 text-white rounded-tr-none'
+            : 'bg-slate-900/90 border border-slate-800 text-slate-200 rounded-tl-none shadow-sm'
+        }`}
+      >
+        {/* Message Content */}
+        {isUser ? (
+          <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+        ) : (
+          <div>
+            <FormattedContent content={msg.content} />
+            {msg.isStreaming && (
+              <span className="inline-block w-1.5 h-3 ml-1 bg-emerald-400 animate-pulse align-middle" />
+            )}
+          </div>
+        )}
+
+        {/* Citations section if available (Compact collapsible UI) */}
+        {!isUser && msg.citations && msg.citations.length > 0 && (
+          <div className="pt-2 border-t border-slate-800/60 space-y-1.5">
+            <button
+              onClick={() => setShowCitations(!showCitations)}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-850 hover:bg-slate-800 border border-slate-750 text-[11px] text-slate-400 hover:text-emerald-400 transition-colors font-mono"
+            >
+              <BookOpen className="w-3 h-3 text-emerald-400" />
+              <span>{msg.citations.length} Source{msg.citations.length > 1 ? 's' : ''} Cited</span>
+              {showCitations ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+
+            {showCitations && (
+              <div className="space-y-1.5 pt-1">
+                {msg.citations.map((c: Citation, cIdx: number) => (
+                  <div
+                    key={cIdx}
+                    className="p-2 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] space-y-1"
+                  >
+                    <div className="flex items-center justify-between text-slate-300 font-mono">
+                      <span className="font-semibold text-emerald-400">[{c.section_name}]</span>
+                      <span className="text-slate-500">{(c.similarity * 100).toFixed(0)}% relevance</span>
+                    </div>
+                    <p className="text-slate-400 leading-relaxed font-sans text-[11px]">
+                      {c.snippet}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isUser && (
+        <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 flex-shrink-0 mt-0.5">
+          <User className="w-4 h-4" />
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ChatInterface({
   messages,
   onSendMessage,
@@ -23,7 +157,6 @@ export function ChatInterface({
   selectedDocName,
 }: ChatInterfaceProps) {
   const [inputQuery, setInputQuery] = useState('')
-  const [expandedCitationId, setExpandedCitationId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -98,89 +231,7 @@ export function ChatInterface({
             </div>
           </div>
         ) : (
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex items-start space-x-3 text-xs ${
-                msg.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
-            >
-              {msg.role === 'assistant' && (
-                <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0 mt-0.5">
-                  <Bot className="w-4 h-4" />
-                </div>
-              )}
-
-              <div
-                className={`max-w-[85%] rounded-2xl p-3.5 space-y-2.5 ${
-                  msg.role === 'user'
-                    ? 'bg-emerald-600 text-white rounded-tr-none'
-                    : 'bg-slate-900/90 border border-slate-800 text-slate-200 rounded-tl-none'
-                }`}
-              >
-                {/* Message Content */}
-                <div className="whitespace-pre-wrap leading-relaxed">
-                  {msg.content}
-                  {msg.isStreaming && (
-                    <span className="inline-block w-1.5 h-3 ml-1 bg-emerald-400 animate-pulse align-middle" />
-                  )}
-                </div>
-
-                {/* Citations section if available */}
-                {msg.citations && msg.citations.length > 0 && (
-                  <div className="pt-2.5 border-t border-slate-800/80 space-y-1.5">
-                    <div className="flex items-center space-x-1.5 text-[11px] font-mono text-emerald-400 font-semibold">
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>Retrieved Citations ({msg.citations.length})</span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1.5">
-                      {msg.citations.map((c: Citation, cIdx: number) => {
-                        const isExpanded = expandedCitationId === `${msg.id}-${cIdx}`
-
-                        return (
-                          <div
-                            key={cIdx}
-                            className="p-1.5 rounded-lg bg-slate-850 border border-slate-750 text-[11px] font-mono w-full"
-                          >
-                            <div
-                              onClick={() =>
-                                setExpandedCitationId(isExpanded ? null : `${msg.id}-${cIdx}`)
-                              }
-                              className="flex items-center justify-between cursor-pointer text-slate-300 hover:text-white"
-                            >
-                              <div className="flex items-center space-x-1.5">
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
-                                  #{cIdx + 1}
-                                </span>
-                                <span className="font-semibold text-slate-200">[{c.section_name}]</span>
-                                <span className="text-slate-400">
-                                  ({(c.similarity * 100).toFixed(1)}% match)
-                                </span>
-                              </div>
-                              {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                            </div>
-
-                            {isExpanded && (
-                              <div className="mt-2 p-2 rounded bg-slate-900 text-slate-300 font-sans text-xs border border-slate-800 leading-normal">
-                                {c.snippet}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {msg.role === 'user' && (
-                <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 flex-shrink-0 mt-0.5">
-                  <User className="w-4 h-4" />
-                </div>
-              )}
-            </div>
-          ))
+          messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
         )}
         <div ref={messagesEndRef} />
       </div>
