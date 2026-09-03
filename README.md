@@ -154,12 +154,16 @@ queued → extracting → extracted → indexing → rag_ready
 │   └── benchmark_report.md         # p50/p95/p99, stage timings, cold-start data
 ├── demo/                            # Screenshots, video instructions, UI walkthrough
 │   └── README.md
-├── samples/                         # 3 representative test CVs + expected JSON
-│   ├── cv1_backend_architect.pdf
+├── samples/                         # Representative test CVs + expected JSON
+│   ├── Jagveer_chauhan_resume.pdf   # Jagveer Chauhan Resume (PDF)
+│   ├── Jagveer_chauhan_resume.json  # Jagveer Chauhan Extracted JSON
+│   ├── Jagveer_Chauhan_CV.docx      # Jagveer Chauhan CV (DOCX)
+│   ├── Jagveer_Chauhan_Resume.docx  # Jagveer Chauhan Resume (DOCX)
+│   ├── cv1_backend_architect.pdf    # Sample Backend Architect (PDF)
 │   ├── cv1_backend_architect.json
-│   ├── cv2_ml_engineer.pdf
+│   ├── cv2_ml_engineer.pdf          # Sample ML Engineer (PDF)
 │   ├── cv2_ml_engineer.json
-│   ├── cv3_frontend_lead.pdf
+│   ├── cv3_frontend_lead.pdf        # Sample Frontend Lead (PDF)
 │   └── cv3_frontend_lead.json
 ├── .gitignore
 ├── build.sh                         # Render Linux native build script (OCR, poppler, pip)

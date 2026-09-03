@@ -116,6 +116,8 @@ npm run dev
 
 | Sample File | Target Role | Expected JSON Schema |
 |---|---|---|
+| `../samples/Jagveer_chauhan_resume.pdf` | Backend Engineer / Tech Lead | `../samples/Jagveer_chauhan_resume.json` |
+| `../samples/Jagveer_Chauhan_CV.docx` | Backend Engineer (DOCX format) | `../samples/Jagveer_chauhan_resume.json` |
 | `../samples/cv1_backend_architect.pdf` | Senior Backend Architect | `../samples/cv1_backend_architect.json` |
 | `../samples/cv2_ml_engineer.pdf` | ML & RAG Engineer | `../samples/cv2_ml_engineer.json` |
 | `../samples/cv3_frontend_lead.pdf` | Frontend Lead | `../samples/cv3_frontend_lead.json` |
