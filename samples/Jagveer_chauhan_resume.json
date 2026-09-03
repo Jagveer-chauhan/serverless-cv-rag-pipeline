@@ -1,0 +1,244 @@
+{
+  "candidate": {
+    "name": "JAGVEER CHAUHAN",
+    "email": "jagveerchauhan3766@gmail.com",
+    "phone": "8810552513",
+    "location": "Faridabad, Haryana, India",
+    "links": [
+      "linkedin.com/in/jagveerchauhan"
+    ],
+    "title": "Backend Engineer"
+  },
+  "summary": "Backend Engineer with 4 years of experience building reliable APIs and high-scale backend systems in Python, Node.js, and PHP/Laravel, including sole ownership of a government mobile API platform (500+ app downloads, 8M+ portal visitors) that passed STQC security testing. Cloud-exposed across AWS, Azure, and Google Cloud; skilled in payment gateway integration (Stripe, Razorpay, PhonePe) with idempotent transaction processing, Laravel queue-based asynchronous workflows, and WordPress/plugin security remediation, including a public open-source vulnerability fix. Currently a backend developer at Forvis Mazars, an MNC; previously served as a dedicated engineer for Blueastral's products via Bitstreaks, translating client requirements into POCs for both entities while leading Bitstreaks' internal team of junior developers.",
+  "experience": [
+    {
+      "company": "Forvis Mazars",
+      "title": "Backend Developer",
+      "start_date": "",
+      "end_date": "",
+      "duration_months": null,
+      "location": "",
+      "description": "Currently a backend developer at Forvis Mazars, an MNC.",
+      "technologies": [],
+      "achievements": [],
+      "inferred_skills": [],
+      "is_current": true
+    },
+    {
+      "company": "Blueastral",
+      "title": "Dedicated Engineer",
+      "start_date": "",
+      "end_date": "",
+      "duration_months": null,
+      "location": "",
+      "description": "Previously served as a dedicated engineer for Blueastral's products via Bitstreaks, translating client requirements into POCs for both entities while leading Bitstreaks' internal team of junior developers.",
+      "technologies": [],
+      "achievements": [],
+      "inferred_skills": [],
+      "is_current": false
+    },
+    {
+      "company": "Forvis Mazars in India",
+      "title": "Software Developer",
+      "start_date": "May 2026",
+      "end_date": "Present",
+      "duration_months": null,
+      "location": "",
+      "description": null,
+      "technologies": [],
+      "achievements": [
+        "Full-stack developer (backend-focused) on FMEXA, an in-house HRMS platform covering employee records, leave, and timesheets, extended with"
+      ],
+      "inferred_skills": []
+    },
+    {
+      "company": "project cost and engagement-management features",
+      "title": "Senior Backend Developer / Technical Lead — Bitstreaks Technologies | dedicated team for Blueastral LLC, US| Faridabad",
+      "start_date": "April 2024",
+      "end_date": "May 2026",
+      "duration_months": null,
+      "location": "US",
+      "description": "business logic for theme license generation, validation, and lifecycle tracking.\ndeveloper team and translating client requirements into POCs for both companies.\nsites pre-release",
+      "technologies": [],
+      "achievements": [
+        "Architected a secure digital rights management system using Python (Django) and Django ORM, building reliable RESTful APIs to manage complex",
+        "Managed product backend development as a dedicated engineer for Blueastral LLC, while simultaneously leading Bitstreaks’ internal junior",
+        "Built a multi-timezone LMS backend (FullCalendar.js, Stripe, Google/LinkedIn OAuth 2.0) for an Australia-based client",
+        "Removed malware from a production WordPress site twice and migrated hosting; built custom plugins and a from-scratch theme deployed on 10+",
+        "Engineered secure background jobs and asynchronous workflows for payment integrations (Stripe, Razorpay), ensuring strict failure recovery"
+      ],
+      "inferred_skills": []
+    },
+    {
+      "company": "through idempotency, retries, timeouts, and automated webhook validation.",
+      "title": "Software Developer — Onetick Technologies |dedicated team for Protean eGov Technologies Ltd. | Faridabad",
+      "start_date": "August 2022",
+      "end_date": "April 2024",
+      "duration_months": null,
+      "location": "Faridabad",
+      "description": "certified), a public government platform with periodic high-traffic spikes\nportal successfully passing strict STQC government security testing.\nmaintenance overhead\nautomated bulk certificate generation (Excel import, Laravel queues, QR verification) for an institute ERP, earning a Brilliant Beginner award.",
+      "technologies": [],
+      "achievements": [
+        "Sole backend developer for the Central Board of Film Certification (CBFC) mobile app API (500+ Android downloads) and portal (8M+ visitors, GIGW-",
+        "Maintained the API environment on Linux servers, implementing Passport authentication and rate-limiting that contributed to both the API and the",
+        "Consolidated architecture by migrating a standalone Node.js file-handling microservice into the core Laravel application to cut cost, latency, and",
+        "Extended and optimized the existing PostgreSQL database schema for the CBFC platform to support evolving application requirements; built"
+      ],
+      "inferred_skills": []
+    }
+  ],
+  "education": [
+    {
+      "institution": "Advanced Institute of Technology & Management, Aurangabad, Tehsil Hodal, Palwal",
+      "degree": "Master of Computer Applications (MCA), Computer Science",
+      "start_date": null,
+      "end_date": null,
+      "location": null,
+      "gpa": null,
+      "notes": null
+    }
+  ],
+  "skills": {
+    "explicit": [
+      "AWS",
+      "Asynchronous Workflows (Queues/Background Jobs)",
+      "Azure",
+      "Claude Code",
+      "Code Review",
+      "Express.js",
+      "Failure Recovery",
+      "Gemini",
+      "Google Cloud",
+      "Idempotent Transactions",
+      "Idempotent transaction processing",
+      "JavaScript",
+      "Laravel",
+      "Modular Monolith Architecture",
+      "MySQL",
+      "Node.js",
+      "OAuth 2.0/JWT",
+      "OpenAI API",
+      "OpenAI Codex",
+      "PHP",
+      "Payment Gateways (Stripe, Razorpay, PhonePe)",
+      "PhonePe",
+      "PostgreSQL",
+      "Python",
+      "REST API Design",
+      "REST API Development",
+      "Razorpay",
+      "Requirement Analysis & POC Development",
+      "STQC Security Testing",
+      "Security Remediation",
+      "Stripe",
+      "Technical Mentorship",
+      "VM Provisioning & Hosting (AWS EC2, DigitalOcean, Azure, GCP)",
+      "Webhook Handling",
+      "WooCommerce",
+      "WordPress",
+      "WordPress/plugin security remediation",
+      "jQuery"
+    ],
+    "inferred": [],
+    "soft_skills": []
+  },
+  "certifications": [],
+  "projects": [
+    {
+      "name": "Government Mobile API Platform",
+      "role": "Sole Owner",
+      "description": "Sole ownership of a government mobile API platform (500+ app downloads, 8M+ portal visitors) that passed STQC security testing. Cloud-exposed across AWS, Azure, and Google Cloud; skilled in payment gateway integration (Stripe, Razorpay, PhonePe) with idempotent transaction processing, Laravel queue-based asynchronous workflows, and WordPress/plugin security remediation, including a public open-source vulnerability fix.",
+      "technologies": [
+        "Python",
+        "Node.js",
+        "PHP/Laravel",
+        "AWS",
+        "Azure",
+        "Google Cloud",
+        "Stripe",
+        "Razorpay",
+        "PhonePe",
+        "Laravel Queue"
+      ],
+      "links": []
+    },
+    {
+      "name": "Central Board of Film Certification (CBFC) — Govt. Mobile App & Portal",
+      "role": "Backend Developer",
+      "description": "Sole backend developer for a public government platform; implemented Passport auth, rate limiting, and STQC-certified security hardening across 2 load-balanced servers. 500+ downloads, 8M+ visitors.",
+      "technologies": [
+        "PHP",
+        "Laravel",
+        "REST API",
+        "PostgreSQL",
+        "MongoDB"
+      ],
+      "links": []
+    },
+    {
+      "name": "JobIQ – Job Portal for Freshers",
+      "role": "Software Engineer",
+      "description": "Built job-seeker-facing search and filtering, and the recruiter/admin job-posting flow, for a platform connecting students and recruiters. jobiq.in",
+      "technologies": [
+        "Node.js",
+        "Express",
+        "MongoDB"
+      ],
+      "links": [
+        "jobiq.in"
+      ]
+    },
+    {
+      "name": "Live Composer — Open-Source WordPress Page Builder",
+      "role": "Software Developer",
+      "description": "PHP, WordPress. github.com/live-composer",
+      "technologies": [
+        "PHP",
+        "WordPress"
+      ],
+      "links": [
+        "github.com/live-composer"
+      ]
+    },
+    {
+      "name": "v2.0 Architectural Overhaul",
+      "role": "Software Architect",
+      "description": "Led a v2.0 architectural overhaul by engineering a core state-tracking engine and modernizing legacy code for PHP 8+ compliance; fortified security by patching critical DOM-based XSS and PHP Object Injection vulnerabilities while implementing safeguards against recursive infinite loops.",
+      "technologies": [
+        "PHP",
+        "PHP 8+"
+      ],
+      "links": []
+    }
+  ],
+  "awards": [],
+  "publications": [],
+  "languages": [],
+  "derived": {
+    "years_of_experience": 4.0,
+    "seniority_level": "Mid",
+    "career_gaps": [],
+    "career_trajectory": null,
+    "domain": "Technology / Engineering",
+    "languages": [
+      "English"
+    ]
+  },
+  "inferred": {
+    "leadership_signals": [
+      "Demonstrates technical ownership",
+      "Self-directed execution"
+    ],
+    "communication_style": "Concise and technical",
+    "potential_red_flags": [],
+    "career_objective": "Seeking challenging engineering roles"
+  },
+  "sections": [],
+  "raw_text": null,
+  "confidence_scores": {
+    "overall": 0.0,
+    "experience_dates": 0.0,
+    "inferred_skills": 0.0
+  },
+  "processing_metadata": null
+}
