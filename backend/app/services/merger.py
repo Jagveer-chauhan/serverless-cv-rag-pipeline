@@ -351,8 +351,17 @@ def _deduplicate_projects(items: List[Dict[str, Any]]) -> List[ProjectItem]:
     for it in items:
         name = str(it.get("name", "")).strip()
         name = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", name, flags=re.I).strip(" ,|–—-")
-        if not name or name.lower() in ("key projects", "selected projects", "projects"):
-            if not it.get("description") and not it.get("technologies"):
+        if not name or name.lower() in ("key projects", "selected projects", "projects", "project"):
+            if seen and (it.get("description") or it.get("technologies")):
+                last_key = list(seen.keys())[-1]
+                last_proj = seen[last_key]
+                curr_tech = last_proj.get("technologies", [])
+                new_tech = it.get("technologies", [])
+                last_proj["technologies"] = list(dict.fromkeys(curr_tech + new_tech))
+                if it.get("description") and it["description"] not in last_proj.get("description", ""):
+                    last_proj["description"] = f"{last_proj.get('description', '')}\n{it['description']}".strip()
+                continue
+            elif not it.get("description") and not it.get("technologies"):
                 continue
         key = name.lower()
         if key not in seen:
@@ -381,12 +390,21 @@ def _deduplicate_work_experience(items: List[Dict[str, Any]]) -> List[WorkExperi
         company = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", company, flags=re.I).strip(" ,|")
         title = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", title, flags=re.I).strip(" ,|")
 
-        if not title or title.lower() in invalid_titles:
-            if company.lower() in ("company", "") and not it.get("achievements") and not it.get("key_achievements"):
-                continue
+        is_generic_title = not title or title.lower() in invalid_titles or title.lower() in ("role", "professional")
+        is_generic_company = not company or company.lower() in ("company", "")
 
-        if re.search(r"\(Part\s+\d+/\d+\)", title, re.I) or title.lower() in ("role", "professional"):
-            if company.lower() in ("company", "") and not it.get("achievements") and not it.get("key_achievements"):
+        # If this is a continuation chunk from a multi-page split
+        if is_generic_company or is_generic_title:
+            if seen and (it.get("achievements") or it.get("key_achievements") or it.get("description")):
+                last_key = list(seen.keys())[-1]
+                last_job = seen[last_key]
+                curr_ach = last_job.get("achievements", last_job.get("key_achievements", []))
+                new_ach = it.get("achievements", it.get("key_achievements", []))
+                last_job["achievements"] = list(dict.fromkeys(curr_ach + new_ach))
+                if it.get("description") and it["description"] not in last_job.get("description", ""):
+                    last_job["description"] = f"{last_job.get('description', '')}\n{it['description']}".strip()
+                continue
+            elif is_generic_company and is_generic_title and not it.get("achievements") and not it.get("key_achievements"):
                 continue
 
         it["company"] = company or "Company"

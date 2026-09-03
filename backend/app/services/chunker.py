@@ -17,7 +17,10 @@ SECTION_HEADER_PATTERNS = [
     (r"(?i)^(?:volunteer\s+experience|volunteering|volunteer\s+work|extracurricular\s+activities|extracurricular|interests|hobbies\s*&\s*interests|leadership\s+activities|activities|volunteer|hobbies|leadership)\b", "ADDITIONAL"),
 ]
 
-MAX_CHUNK_CHAR_SIZE = 1200  # ~250-300 tokens
+MAX_CHUNK_CHAR_SIZE = 2500  # ~500-600 tokens (optimal for multi-page CV section continuity)
+PAGE_NO_REGEX = re.compile(
+    r"(?i)^(?:page\s+\d+(?:\s*(?:of|/)\s*\d+)?|\d+\s*(?:of|/)\s*\d+|-\s*\d+\s*-|page\s*\|\s*\d+|\d+\s*\|\s*page)\s*$"
+)
 
 
 @dataclass
@@ -59,6 +62,10 @@ def chunk_cv_text(raw_text: str) -> List[TextChunk]:
         if not stripped:
             if current_lines:
                 current_lines.append("")
+            continue
+
+        # Skip standalone page numbering artifacts
+        if PAGE_NO_REGEX.match(stripped):
             continue
 
         # Check if line matches a known section header
@@ -112,7 +119,7 @@ def chunk_cv_text(raw_text: str) -> List[TextChunk]:
             )
             chunk_idx += 1
         else:
-            # Split section by paragraphs or lines
+            # Split section by paragraphs or entries
             paragraphs = sec_text.split("\n\n")
             sub_chunks = []
             curr_buf: List[str] = []

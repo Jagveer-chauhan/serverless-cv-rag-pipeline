@@ -148,13 +148,22 @@ def extract_text_from_pdf(pdf_bytes: bytes, filename: str = "document.pdf") -> T
     pages_text = []
     total_chars = 0
 
+    PAGE_NO_REGEX = re.compile(
+        r"(?i)^(?:page\s+\d+(?:\s*(?:of|/)\s*\d+)?|\d+\s*(?:of|/)\s*\d+|-\s*\d+\s*-|page\s*\|\s*\d+|\d+\s*\|\s*page)\s*$"
+    )
+
     for page_idx in range(page_count):
         page = doc.load_page(page_idx)
         # Sort blocks by geometric reading order (handles multi-column layouts)
         try:
             blocks = page.get_text("blocks", sort=True)
             # block[4] contains text in PyMuPDF block tuple (x0, y0, x1, y1, text, block_no, block_type)
-            page_blocks_text = [b[4].strip() for b in blocks if len(b) > 4 and b[4].strip()]
+            page_blocks_text = []
+            for b in blocks:
+                if len(b) > 4 and b[4].strip():
+                    b_text = b[4].strip()
+                    if not PAGE_NO_REGEX.match(b_text):
+                        page_blocks_text.append(b_text)
             text = "\n\n".join(page_blocks_text) if page_blocks_text else (page.get_text("text", sort=True) or "")
         except Exception:
             text = page.get_text("text", sort=True) or ""
