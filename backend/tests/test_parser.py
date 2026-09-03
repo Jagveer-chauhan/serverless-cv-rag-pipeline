@@ -85,3 +85,23 @@ def test_docx_extraction():
     text_uni, meta_uni = extract_text_from_document(docx_bytes, filename="alex_cv.docx")
     assert "Alex Rivera" in text_uni
     assert meta_uni["char_count"] > 30
+
+
+def test_multi_column_pdf_extraction():
+    """Verify that 2-column PDFs extract in cohesive reading order instead of interleaving lines."""
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    # Left column: (50, 72, 250, 500)
+    page.insert_textbox(fitz.Rect(50, 72, 250, 500), "TECHNICAL SKILLS\nPython\nDocker\nKubernetes\nPostgreSQL")
+    # Right column: (300, 72, 550, 500)
+    page.insert_textbox(fitz.Rect(300, 72, 550, 500), "WORK EXPERIENCE\nSenior Software Architect at Cloud Corp\nLed cloud migration.")
+    pdf_bytes = doc.write()
+    doc.close()
+
+    text, meta = extract_text_from_pdf(pdf_bytes, filename="multi_col.pdf")
+    assert meta["parser"] == "pymupdf_direct"
+    # Ensure block content is extracted coherently
+    assert "TECHNICAL SKILLS" in text
+    assert "Python" in text
+    assert "WORK EXPERIENCE" in text
+    assert "Cloud Corp" in text

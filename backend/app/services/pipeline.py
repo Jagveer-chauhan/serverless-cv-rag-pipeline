@@ -15,7 +15,7 @@ from backend.app.services.chunker import chunk_cv_text, TextChunk
 from backend.app.services.llm_extractor import LLMExtractor
 from backend.app.services.merger import merge_extracted_chunks
 from backend.app.services.embedder import generate_embeddings
-from backend.app.services.vector_store import search_similar_chunks
+from backend.app.services.vector_store import search_similar_chunks, _is_postgres
 from backend.app.schemas.cv_schema import CVExtractionSchema, calculate_confidence_scores, ProcessingMetadata
 from backend.app.core.state import app_state
 
@@ -82,16 +82,8 @@ async def execute_cv_pipeline(
             embeddings = generate_embeddings(chunk_texts)
 
         # =========================================================================
-        # Stage 7: Vector Upsert (pgvector — raw SQL CAST to avoid asyncpg codec issues)
+        # Stage 7: Vector Upsert (pgvector on PostgreSQL; ORM on SQLite)
         # =========================================================================
-        # We bypass the SQLAlchemy ORM for the embedding column entirely.
-        # The ORM + pgvector.sqlalchemy.Vector requires the asyncpg codec to be
-        # registered on the connection, which consistently fails on free-tier
-        # Render/Supabase (run_async hook is unreliable in pooled async contexts).
-        #
-        # Solution: raw SQL INSERT with CAST(:embedding AS vector).
-        # asyncpg passes the embedding as a plain text string; PostgreSQL's
-        # pgvector extension casts it to vector itself.  Zero codec dependency.
         db_chunks: List[CVChunk] = []
         async with tracer.trace_stage("vector_upsert"):
             now = datetime.now(timezone.utc)
@@ -128,7 +120,7 @@ async def execute_cv_pipeline(
                     "section_heading": tc.section_name,
                 }
 
-                if embedding_str:
+                if _is_postgres(db) and embedding_str:
                     await db.execute(
                         text("""
                             INSERT INTO cv_chunks
@@ -152,7 +144,7 @@ async def execute_cv_pipeline(
                         }
                     )
                 else:
-                    # Fallback: no embedding (shouldn't happen in practice)
+                    # Fallback (SQLite or non-Postgres): insert via ORM
                     db_chunk = CVChunk(
                         id=chunk_id,
                         document_id=doc.id,
@@ -251,16 +243,18 @@ async def execute_cv_pipeline(
         return doc, summary
 
     except Exception as e:
-        logger.error(f"Pipeline failed for document {doc.id}: {e}", exc_info=True)
+        doc_id = getattr(doc, "id", "unknown")
+        logger.error(f"Pipeline failed for document {doc_id}: {e}", exc_info=True)
         await db.rollback()
 
         # Mark as degraded if we have some data, otherwise failed
         try:
-            doc.status = "degraded" if doc.parsed_json else "failed"
+            doc.status = "degraded" if getattr(doc, "parsed_json", None) else "failed"
             doc.error_message = str(e)
             db.add(doc)
             await db.commit()
-            await tracer.persist(db, document_id=doc.id)
+            if doc_id and doc_id != "unknown":
+                await tracer.persist(db, document_id=doc_id)
         except Exception as rollback_err:
             logger.error(f"Failed to record failed status in db: {rollback_err}")
         raise e

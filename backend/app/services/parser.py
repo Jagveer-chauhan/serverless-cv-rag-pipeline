@@ -7,9 +7,9 @@ import logging
 from typing import Tuple, Dict, Any, Optional
 
 try:
-    import fitz
-except ImportError:
     import pymupdf as fitz
+except ImportError:
+    import fitz
 
 try:
     import docx
@@ -132,7 +132,7 @@ def extract_text_from_docx(docx_bytes: bytes, filename: str = "document.docx") -
 
 
 def extract_text_from_pdf(pdf_bytes: bytes, filename: str = "document.pdf") -> Tuple[str, Dict[str, Any]]:
-    """Extracts text from PDF bytes in-memory using PyMuPDF with OCR fallback.
+    """Extracts text from PDF bytes in-memory using PyMuPDF with reading-order sorting and OCR fallback.
     
     Returns:
         Tuple of (extracted_text, metadata_dict)
@@ -150,7 +150,15 @@ def extract_text_from_pdf(pdf_bytes: bytes, filename: str = "document.pdf") -> T
 
     for page_idx in range(page_count):
         page = doc.load_page(page_idx)
-        text = page.get_text("text") or ""
+        # Sort blocks by geometric reading order (handles multi-column layouts)
+        try:
+            blocks = page.get_text("blocks", sort=True)
+            # block[4] contains text in PyMuPDF block tuple (x0, y0, x1, y1, text, block_no, block_type)
+            page_blocks_text = [b[4].strip() for b in blocks if len(b) > 4 and b[4].strip()]
+            text = "\n\n".join(page_blocks_text) if page_blocks_text else (page.get_text("text", sort=True) or "")
+        except Exception:
+            text = page.get_text("text", sort=True) or ""
+
         pages_text.append(text)
         total_chars += len(text.strip())
 

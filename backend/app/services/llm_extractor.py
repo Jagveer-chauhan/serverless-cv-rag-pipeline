@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from backend.app.core.config import settings
 from backend.app.core.state import app_state
 from backend.app.services.chunker import TextChunk
-from backend.app.schemas.cv_schema import CVExtractionSchema
+from backend.app.schemas.cv_schema import ChunkExtractionSchema
 
 logger = logging.getLogger("cv_rag_pipeline.llm_extractor")
 
@@ -148,7 +148,7 @@ class LLMExtractor:
                 if not isinstance(parsed_data, dict):
                     raise ValueError(f"Expected JSON object, got {type(parsed_data)}")
 
-                CVExtractionSchema.model_validate(parsed_data)
+                ChunkExtractionSchema.model_validate(parsed_data)
                 return parsed_data
 
             except (json.JSONDecodeError, ValidationError, ValueError) as val_err:
@@ -207,79 +207,241 @@ class LLMExtractor:
         return list(results)
 
     def _heuristic_chunk_extraction(self, chunk: TextChunk) -> Dict[str, Any]:
-        """Fast, robust deterministic heuristic extraction for offline/fallback/zero-key modes."""
+        """Robust deterministic heuristic extraction for offline/fallback/zero-key modes."""
         content = chunk.content
         section = chunk.section_name
         data: Dict[str, Any] = {}
 
         if section == "CONTACT_HEADER" or "CONTACT" in section:
             email_match = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", content)
-            phone_match = re.search(r"\(?\+?[0-9]{1,3}\)?[-.\\s]?[0-9]{3,4}[-.\\s]?[0-9]{3,4}", content)
+            phone_match = re.search(r"(?:\+?\d{1,3}[\s-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}", content)
+            
+            # Find links including github.com and linkedin.com without http prefix
+            links = []
+            for m in re.finditer(r"https?://[^\s,;]+|(?:linkedin\.com/in/[^\s,;]+)|(?:github\.com/[^\s,;]+)", content, re.I):
+                url = m.group(0)
+                if not url.startswith("http"):
+                    url = f"https://{url}"
+                links.append(url)
+
             lines = [l.strip() for l in content.splitlines() if l.strip() and not l.startswith("[")]
-            name = lines[0] if lines else "Candidate"
-            title = lines[1] if len(lines) > 1 and "@" not in lines[1] else None
+            # Filter out generic header words
+            filtered_lines = [
+                l for l in lines
+                if not re.match(r"(?i)^(?:curriculum vitae|resume|contact|contact information|profile)$", l.strip())
+            ]
+
+            name = "Candidate"
+            title = None
+            location = None
+
+            if filtered_lines:
+                # First line is usually Name (or Name | Title)
+                first_line = filtered_lines[0]
+                if "|" in first_line:
+                    parts = [p.strip() for p in first_line.split("|") if p.strip()]
+                    name = parts[0]
+                    if len(parts) > 1 and not re.search(r"[@\d]", parts[1]):
+                        title = parts[1]
+                else:
+                    name = first_line
+
+                for l in filtered_lines[1:]:
+                    if not title and not re.search(r"[@\d]|linkedin|github|http", l, re.I) and len(l) < 50:
+                        if "," in l and any(kw in l.lower() for kw in ["ca", "ny", "usa", "germany", "uk", "india", "london", "berlin", "san francisco", "austin"]):
+                            location = l
+                        else:
+                            title = l
+                    elif not location and ("," in l or any(kw in l.lower() for kw in ["ca", "ny", "usa", "germany", "uk", "india", "london", "berlin", "san francisco", "remote"])):
+                        if not re.search(r"[@]|linkedin|github|http", l, re.I):
+                            location = l
 
             data["candidate_info"] = {
                 "name": name,
                 "email": email_match.group(0) if email_match else None,
                 "phone": phone_match.group(0) if phone_match else None,
+                "location": location,
                 "title": title,
-                "links": re.findall(r"https?://[^\s]+", content),
+                "links": list(set(links)),
             }
 
         elif section == "SUMMARY":
-            summary_text = re.sub(r"^\[SUMMARY\]\s*", "", content).strip()
+            summary_text = re.sub(r"^\[SUMMARY(?:.*?)]\s*", "", content, flags=re.I).strip()
+            summary_text = re.sub(r"(?i)^(?:professional\s+summary|summary|profile|about\s+me)\s*\n+", "", summary_text).strip()
             data["summary"] = summary_text
 
         elif section == "EXPERIENCE":
             exp_items = []
-            blocks = re.split(r"\n(?=[A-Z][A-Za-z0-9\s]+(?:at|@|–|-|\()|\\d{4})", content)
+            clean_content = re.sub(r"^\[EXPERIENCE(?:.*?)]\s*", "", content, flags=re.I).strip()
+            clean_content = re.sub(r"(?i)^(?:work\s+experience|professional\s+experience|experience|employment\s+history|career\s+history|work\s+history|employment)\s*\n+", "", clean_content).strip()
+            # Split jobs by double newlines or date/title header lines
+            blocks = re.split(r"\n\s*\n|(?<=\n)(?=[A-Z][A-Za-z0-9\s,&/.-]+(?:\s+at\s+|\s+@\s+|\s+–\s+|\s+-\s+|\s*\|\s*|\s*\(\d{4}|\s*\d{4}))", clean_content)
+            
             for b in blocks:
-                b_clean = re.sub(r"^\[EXPERIENCE(?:.*?)]\s*", "", b).strip()
+                b_clean = b.strip()
                 if not b_clean:
                     continue
                 lines = [l.strip() for l in b_clean.splitlines() if l.strip()]
-                if lines:
-                    title_line = lines[0]
-                    company = "Company"
-                    position = title_line
-                    if " at " in title_line:
-                        parts = title_line.split(" at ", 1)
-                        position, company = parts[0], parts[1]
-                    elif " - " in title_line:
-                        parts = title_line.split(" - ", 1)
-                        position, company = parts[0], parts[1]
-                    bullets = [l.lstrip("-•* ") for l in lines[1:] if l.startswith(("-", "•", "*"))]
-                    exp_items.append({
-                        "company": company,
-                        "position": position,
-                        "key_achievements": bullets,
-                        "description": " ".join(lines[1:]) if not bullets else None
-                    })
+                if not lines:
+                    continue
+
+                header_line = lines[0]
+                company = "Company"
+                position = header_line
+                start_date = None
+                end_date = None
+
+                # Extract date range like (2021-03 to 2024-07), (Jan 2020 - Present), 2020 - Present
+                date_match = re.search(r"(?:\((?:from\s+)?|\b)((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|[0-9]{1,2}/)?\s*\d{4}(?:-[0-9]{1,2})?)\s*(?:-|–|to)\s*(\d{4}(?:-[0-9]{1,2})?|Present|Current|Now)\)?", header_line, re.I)
+                if date_match:
+                    start_date = date_match.group(1).strip()
+                    end_date = date_match.group(2).strip()
+                    header_line = header_line.replace(date_match.group(0), "").strip(" ()-,|")
+
+                if " | " in header_line:
+                    parts = header_line.split(" | ", 1)
+                    # Check if company | position or position | company
+                    if any(kw in parts[1].lower() for kw in ["engineer", "architect", "developer", "lead", "manager", "specialist", "scientist", "consultant"]):
+                        company, position = parts[0].strip(), parts[1].strip()
+                    else:
+                        position, company = parts[0].strip(), parts[1].strip()
+                elif " at " in header_line:
+                    parts = header_line.split(" at ", 1)
+                    position, company = parts[0].strip(), parts[1].strip()
+                elif " - " in header_line:
+                    parts = header_line.split(" - ", 1)
+                    position, company = parts[0].strip(), parts[1].strip()
+
+                bullets = []
+                desc_lines = []
+                technologies = []
+
+                for l in lines[1:]:
+                    # Check if line contains a date range
+                    l_date = re.search(r"(?:\((?:from\s+)?|\b)((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|[0-9]{1,2}/)?\s*\d{4}(?:-[0-9]{1,2})?)\s*(?:-|–|to)\s*(\d{4}(?:-[0-9]{1,2})?|Present|Current|Now)\)?", l, re.I)
+                    if l_date and not start_date:
+                        start_date = l_date.group(1).strip()
+                        end_date = l_date.group(2).strip()
+                        continue
+
+                    # Check for tech list in bullet
+                    tech_match = re.search(r"(?i)(?:technologies|tech stack|tools|built with):\s*(.*)", l)
+                    if tech_match:
+                        technologies.extend([t.strip() for t in re.split(r"[,|;]+", tech_match.group(1)) if t.strip()])
+                        continue
+
+                    if l.startswith(("-", "•", "*", "–", "—")):
+                        bullets.append(l.lstrip("-•*–— ").strip())
+                    else:
+                        desc_lines.append(l)
+
+                exp_items.append({
+                    "company": company or "Company",
+                    "position": position or "Professional",
+                    "title": position or "Professional",
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "key_achievements": bullets,
+                    "achievements": bullets,
+                    "technologies": technologies,
+                    "technologies_used": technologies,
+                    "description": "\n".join(desc_lines) if desc_lines else None
+                })
+
             data["work_experience"] = exp_items or [
-                {"company": "Company", "position": "Professional", "description": content}
+                {"company": "Company", "position": "Professional", "title": "Professional", "description": content}
             ]
 
         elif section == "EDUCATION":
             edu_items = []
-            lines = [l.strip() for l in content.splitlines() if l.strip() and not l.startswith("[")]
-            for l in lines:
-                if len(l) > 3:
-                    edu_items.append({"institution": l, "degree": "Degree / Study"})
+            clean_content = re.sub(r"^\[EDUCATION(?:.*?)]\s*", "", content, flags=re.I).strip()
+            clean_content = re.sub(r"(?i)^(?:education|academic\s+background|academic\s+qualifications|qualifications|degrees)\s*\n+", "", clean_content).strip()
+            lines = [l.strip() for l in clean_content.splitlines() if l.strip()]
+            
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                institution = line
+                degree = None
+                start_year = None
+                end_year = None
+
+                # Extract date ranges like (2010-09 to 2014-06)
+                date_match = re.search(r"(?:\((?:from\s+)?|\b)((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|[0-9]{1,2}/)?\s*\d{4}(?:-[0-9]{1,2})?)\s*(?:-|–|to)\s*(\d{4}(?:-[0-9]{1,2})?|Present|Current|Now)\)?", line, re.I)
+                if date_match:
+                    start_year = date_match.group(1).strip()
+                    end_year = date_match.group(2).strip()
+                    line = line.replace(date_match.group(0), "").strip(" ()-,|")
+
+                if " | " in line:
+                    parts = [p.strip() for p in line.split(" | ") if p.strip()]
+                    if len(parts) >= 2:
+                        institution, degree = parts[0], parts[1]
+                elif " - " in line:
+                    parts = [p.strip() for p in line.split(" - ") if p.strip()]
+                    if len(parts) >= 2:
+                        degree, institution = parts[0], parts[1]
+                else:
+                    deg_match = re.search(r"(?i)\b(B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?A\.?|Ph\.?D\.?|Bachelor[s]?|Master[s]?|Doctorate|Associate|Diploma|Degree)(?:\s+(?:of|in)\s+[A-Za-z\s]+)?", line)
+                    if deg_match:
+                        degree = deg_match.group(0).strip()
+
+                edu_items.append({
+                    "institution": institution or "University",
+                    "degree": degree or "Degree / Study",
+                    "start_year": start_year,
+                    "end_year": end_year,
+                    "start_date": start_year,
+                    "end_date": end_year,
+                })
+                i += 1
+
             data["education"] = edu_items or [{"institution": "University", "degree": "Degree"}]
 
         elif section == "SKILLS":
-            skills_text = re.sub(r"^\[SKILLS(?:.*?)]\s*", "", content).strip()
-            raw_skills = [s.strip() for s in re.split(r"[,|\n•]+", skills_text)
-                          if s.strip() and not s.startswith("[")]
-            data["skills"] = [{"category_name": "Technical Skills", "skills": raw_skills}]
+            skills_text = re.sub(r"^\[SKILLS(?:.*?)]\s*", "", content, flags=re.I).strip()
+            skills_text = re.sub(r"(?i)^(?:technical\s+skills|skills|technologies|tools\s*&\s*technologies)\s*\n+", "", skills_text).strip()
+            skills_by_cat = []
+            explicit_skills = []
+
+            for line in skills_text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                if ":" in line:
+                    cat_name, s_vals = line.split(":", 1)
+                    s_list = [s.strip() for s in re.split(r"[,|•]+", s_vals) if s.strip()]
+                    if s_list:
+                        skills_by_cat.append({"category_name": cat_name.strip(), "skills": s_list})
+                        explicit_skills.extend(s_list)
+                else:
+                    items = [s.strip() for s in re.split(r"[,|\n•]+", line) if s.strip()]
+                    explicit_skills.extend(items)
+
+            if skills_by_cat:
+                data["skills"] = skills_by_cat
+            else:
+                data["skills"] = [{"category_name": "Technical Skills", "skills": explicit_skills or [skills_text]}]
 
         elif section == "PROJECTS":
-            data["projects"] = [{"name": "Key Project", "description": content}]
+            clean_content = re.sub(r"^\[PROJECTS(?:.*?)]\s*", "", content, flags=re.I).strip()
+            clean_content = re.sub(r"(?i)^(?:projects|key\s+projects)\s*\n+", "", clean_content).strip()
+            data["projects"] = [{"name": "Key Projects", "description": clean_content}]
 
         elif section == "CERTIFICATIONS":
-            data["certifications"] = [
-                {"name": content.replace("[CERTIFICATIONS]", "").strip() or "Certification"}
-            ]
+            clean_content = re.sub(r"^\[CERTIFICATIONS(?:.*?)]\s*", "", content, flags=re.I).strip()
+            clean_content = re.sub(r"(?i)^(?:certifications|certificates|licenses)\s*\n+", "", clean_content).strip()
+            cert_items = []
+            for l in clean_content.splitlines():
+                l = l.strip(" -•*")
+                if l:
+                    # Match name (issuer, date) like AWS Certified Solutions Architect (Amazon, 2023-01)
+                    meta_m = re.search(r"\((.*?),\s*(\d{4}(?:-\d{2})?)\)", l)
+                    if meta_m:
+                        c_name = l.replace(meta_m.group(0), "").strip(" -•*,")
+                        cert_items.append({"name": c_name, "issuer": meta_m.group(1).strip(), "date": meta_m.group(2).strip()})
+                    else:
+                        cert_items.append({"name": l})
+            data["certifications"] = cert_items or [{"name": clean_content}]
 
         return data

@@ -53,7 +53,7 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         exp_list = extract.get("experience") or extract.get("work_experience")
         if exp_list and isinstance(exp_list, list):
             for item in exp_list:
-                if isinstance(item, dict) and (item.get("company") or item.get("title") or item.get("position")):
+                if isinstance(item, dict) and (item.get("company") or item.get("title") or item.get("position") or item.get("description")):
                     # Normalize position -> title
                     if "position" in item and "title" not in item:
                         item["title"] = item["position"]
@@ -67,25 +67,46 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         edu_list = extract.get("education")
         if edu_list and isinstance(edu_list, list):
             for item in edu_list:
-                if isinstance(item, dict) and item.get("institution"):
+                if isinstance(item, dict) and (item.get("institution") or item.get("degree")):
+                    if "start_year" in item and "start_date" not in item:
+                        item["start_date"] = item["start_year"]
+                    if "end_year" in item and "end_date" not in item:
+                        item["end_date"] = item["end_year"]
                     merged_education.append(item)
 
         # 5. Skills
         skills_data = extract.get("skills")
         if skills_data:
             if isinstance(skills_data, dict):
+                # Standard SkillsBlock fields
                 merged_skills_explicit.extend(skills_data.get("explicit", []))
                 merged_skills_inferred.extend(skills_data.get("inferred", []))
                 merged_skills_soft.extend(skills_data.get("soft_skills", []))
+                
+                # Dynamic/custom category keys (e.g. {"languages": [...], "databases": [...]})
+                for cat_key, cat_val in skills_data.items():
+                    if cat_key in ("explicit", "inferred", "soft_skills"):
+                        continue
+                    if isinstance(cat_val, list):
+                        if "soft" in cat_key.lower():
+                            merged_skills_soft.extend([str(s) for s in cat_val if s])
+                        else:
+                            merged_skills_explicit.extend([str(s) for s in cat_val if s])
+                    elif isinstance(cat_val, str):
+                        merged_skills_explicit.append(cat_val)
+
             elif isinstance(skills_data, list):
                 for sc in skills_data:
                     if isinstance(sc, dict):
                         cat = str(sc.get("category_name", "")).lower()
                         s_list = sc.get("skills", [])
-                        if "soft" in cat:
-                            merged_skills_soft.extend(s_list)
-                        else:
-                            merged_skills_explicit.extend(s_list)
+                        if isinstance(s_list, list):
+                            if "soft" in cat:
+                                merged_skills_soft.extend([str(s) for s in s_list if s])
+                            else:
+                                merged_skills_explicit.extend([str(s) for s in s_list if s])
+                        elif isinstance(s_list, str):
+                            merged_skills_explicit.append(s_list)
                     elif isinstance(sc, str):
                         merged_skills_explicit.append(sc)
 
@@ -93,8 +114,16 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         cert_list = extract.get("certifications")
         if cert_list and isinstance(cert_list, list):
             for c in cert_list:
-                if isinstance(c, dict) and c.get("name"):
-                    merged_certifications.append(c)
+                if isinstance(c, dict) and (c.get("name") or c.get("title")):
+                    name = c.get("name") or c.get("title") or "Certification"
+                    date_val = c.get("date") or c.get("issue_date")
+                    url_val = c.get("url") or c.get("link")
+                    merged_certifications.append({
+                        "name": name,
+                        "issuer": c.get("issuer"),
+                        "date": date_val,
+                        "url": url_val
+                    })
 
         # 7. Projects & Custom Sections
         proj_list = extract.get("projects") or extract.get("sections")
@@ -104,8 +133,19 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
                     heading = p.get("heading") or p.get("name") or "Projects"
                     content = p.get("content") or p.get("description") or str(p)
                     merged_sections.append({"heading": heading, "content": content})
+                elif isinstance(p, str):
+                    merged_sections.append({"heading": "Projects", "content": p})
 
-        # 8. Derived / Inferred signals
+        # 8. Languages
+        lang_list = extract.get("languages")
+        if lang_list and isinstance(lang_list, list):
+            for l in lang_list:
+                if isinstance(l, dict) and l.get("language"):
+                    merged_languages.append(l["language"])
+                elif isinstance(l, str):
+                    merged_languages.append(l)
+
+        # 9. Derived / Inferred signals
         derived_data = extract.get("derived")
         if derived_data and isinstance(derived_data, dict):
             merged_languages.extend(derived_data.get("languages", []))
@@ -121,9 +161,9 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
     deduped_edu = _deduplicate_education(merged_education)
 
     # Deduplicate Skills
-    explicit_skills = sorted(list({s.strip() for s in merged_skills_explicit if s and s.strip()}))
-    inferred_skills = sorted(list({s.strip() for s in merged_skills_inferred if s and s.strip()}))
-    soft_skills = sorted(list({s.strip() for s in merged_skills_soft if s and s.strip()}))
+    explicit_skills = sorted(list({s.strip() for s in merged_skills_explicit if s and isinstance(s, str) and s.strip()}))
+    inferred_skills = sorted(list({s.strip() for s in merged_skills_inferred if s and isinstance(s, str) and s.strip()}))
+    soft_skills = sorted(list({s.strip() for s in merged_skills_soft if s and isinstance(s, str) and s.strip()}))
 
     skills_block = SkillsBlock(
         explicit=explicit_skills,
@@ -136,6 +176,21 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
 
     # Calculate Derived insights
     approx_years = len(deduped_exp) * 2.5 if deduped_exp else 1.0
+    # Try to calculate more accurate years if dates exist
+    year_numbers = []
+    for exp in deduped_exp:
+        if exp.start_date:
+            import re as _re
+            m = _re.search(r"\b(19\d\d|20\d\d)\b", exp.start_date)
+            if m:
+                year_numbers.append(int(m.group(1)))
+    if year_numbers:
+        from datetime import datetime
+        earliest_year = min(year_numbers)
+        current_year = datetime.now().year
+        calc_years = float(max(1, current_year - earliest_year))
+        approx_years = min(calc_years, 30.0)
+
     seniority = "Senior" if approx_years >= 5 else "Mid" if approx_years >= 2 else "Junior"
     derived_insights = DerivedInsights(
         years_of_experience=approx_years,
@@ -171,9 +226,12 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
 
 def _deduplicate_work_experience(items: List[Dict[str, Any]]) -> List[WorkExperienceItem]:
     seen = {}
+    invalid_titles = {"experience", "work experience", "professional experience", "employment", "career history", "work history"}
     for it in items:
         company = str(it.get("company", "")).strip().lower()
         title = str(it.get("title", it.get("position", ""))).strip().lower()
+        if title in invalid_titles and company in ("company", ""):
+            continue
         key = (company, title)
         if key not in seen:
             it["title"] = it.get("title") or it.get("position") or "Role"

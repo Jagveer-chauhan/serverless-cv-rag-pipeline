@@ -80,3 +80,79 @@ def test_merge_deduplication():
 
     # Verify skills deduplicated
     assert len(merged.skills.explicit) == 4  # Python, FastAPI, SQLAlchemy, PostgreSQL
+
+
+def test_chunk_extraction_schema_with_dynamic_sections():
+    from backend.app.schemas.cv_schema import ChunkExtractionSchema
+
+    # Validate that ChunkExtractionSchema accepts chunk-level extractions with projects, languages, awards, position
+    raw_chunk = {
+        "candidate_info": {
+            "name": "Alex Chen",
+            "email": "alex@example.com",
+            "phone": "+1 555 0199",
+            "location": "San Francisco, CA"
+        },
+        "work_experience": [
+            {
+                "company": "Stripe",
+                "position": "Staff Engineer",
+                "start_date": "2020",
+                "end_date": "2024",
+                "key_achievements": ["Built high-throughput payment pipeline"],
+                "technologies_used": ["Go", "Kafka", "PostgreSQL"]
+            }
+        ],
+        "education": [
+            {
+                "institution": "Stanford University",
+                "degree": "M.S. in Computer Science",
+                "start_year": "2018",
+                "end_year": "2020"
+            }
+        ],
+        "projects": [
+            {"name": "Distributed Cache", "description": "High performance Raft cluster"}
+        ],
+        "languages": [
+            {"language": "English", "proficiency": "Native"},
+            {"language": "Mandarin", "proficiency": "Fluent"}
+        ],
+        "awards": [
+            {"title": "Hackathon Winner", "issuer": "TechCrunch"}
+        ]
+    }
+
+    validated = ChunkExtractionSchema.model_validate(raw_chunk)
+    assert validated.candidate.name == "Alex Chen"
+    assert validated.experience[0].title == "Staff Engineer"
+    assert validated.education[0].start_date == "2018"
+    assert len(validated.projects) == 1
+    assert len(validated.languages) == 2
+
+    # Now verify merger properly routes these into the assignment CVExtractionSchema
+    merged = merge_extracted_chunks([raw_chunk])
+    assert merged.candidate.name == "Alex Chen"
+    assert merged.experience[0].company == "Stripe"
+    assert merged.experience[0].title == "Staff Engineer"
+    assert "English" in merged.derived.languages
+    assert "Mandarin" in merged.derived.languages
+    assert any("Distributed Cache" in s.heading or "Distributed Cache" in s.content for s in merged.sections)
+
+
+def test_merge_arbitrary_skill_dictionaries():
+    raw_chunk = {
+        "skills": {
+            "languages": ["Python", "Rust", "Go"],
+            "frameworks": ["FastAPI", "Next.js"],
+            "databases": ["PostgreSQL", "Redis"],
+            "soft_skills": ["Leadership", "Mentoring"]
+        }
+    }
+
+    merged = merge_extracted_chunks([raw_chunk])
+    assert "Python" in merged.skills.explicit
+    assert "Rust" in merged.skills.explicit
+    assert "FastAPI" in merged.skills.explicit
+    assert "PostgreSQL" in merged.skills.explicit
+    assert "Leadership" in merged.skills.soft_skills

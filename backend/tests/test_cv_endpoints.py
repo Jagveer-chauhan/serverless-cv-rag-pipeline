@@ -5,6 +5,7 @@ try:
     import fitz
 except ImportError:
     import pymupdf as fitz
+from sqlalchemy.pool import StaticPool
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
@@ -15,7 +16,12 @@ from backend.app.db.session import get_db
 
 @pytest_asyncio.fixture
 async def override_db():
-    test_engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    test_engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        echo=False
+    )
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

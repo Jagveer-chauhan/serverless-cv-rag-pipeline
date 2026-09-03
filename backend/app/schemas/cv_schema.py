@@ -25,24 +25,24 @@ class CandidateInfo(DynamicBaseModel):
 
 
 class WorkExperienceItem(DynamicBaseModel):
-    company: str
-    title: str = Field(..., description="Position or role title")
+    company: str = Field(default="Company")
+    title: str = Field(default="Role", alias="position", description="Position or role title")
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     duration_months: Optional[int] = None
     description: Optional[str] = None
-    technologies: List[str] = Field(default_factory=list)
-    achievements: List[str] = Field(default_factory=list)
+    technologies: List[str] = Field(default_factory=list, alias="technologies_used")
+    achievements: List[str] = Field(default_factory=list, alias="key_achievements")
     inferred_skills: List[str] = Field(default_factory=list)
 
 
 class EducationItem(DynamicBaseModel):
-    institution: str
+    institution: str = Field(default="University")
     degree: Optional[str] = None
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: Optional[str] = Field(default=None, alias="start_year")
+    end_date: Optional[str] = Field(default=None, alias="end_year")
     gpa: Optional[Union[str, float]] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(default=None, alias="honors")
 
 
 class SkillsBlock(DynamicBaseModel):
@@ -52,10 +52,10 @@ class SkillsBlock(DynamicBaseModel):
 
 
 class CertificationItem(DynamicBaseModel):
-    name: str
+    name: str = Field(default="Certification")
     issuer: Optional[str] = None
-    date: Optional[str] = None
-    url: Optional[str] = None
+    date: Optional[str] = Field(default=None, alias="issue_date")
+    url: Optional[str] = Field(default=None, alias="link")
 
 
 class CareerGapItem(DynamicBaseModel):
@@ -83,6 +83,20 @@ class InferredSignals(DynamicBaseModel):
 class CustomSection(DynamicBaseModel):
     heading: str
     content: str
+
+
+class ChunkExtractionSchema(DynamicBaseModel):
+    """Flexible chunk extraction schema allowing chunk-level partial extractions."""
+    candidate: Optional[CandidateInfo] = Field(default=None, alias="candidate_info")
+    summary: Optional[str] = None
+    experience: List[WorkExperienceItem] = Field(default_factory=list, alias="work_experience")
+    education: List[EducationItem] = Field(default_factory=list)
+    skills: Optional[Union[SkillsBlock, List[Any], Dict[str, Any]]] = None
+    certifications: List[Union[CertificationItem, Dict[str, Any]]] = Field(default_factory=list)
+    projects: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
+    languages: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
+    awards: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
+    sections: List[Union[CustomSection, Dict[str, Any]]] = Field(default_factory=list)
 
 
 class ConfidenceScores(DynamicBaseModel):

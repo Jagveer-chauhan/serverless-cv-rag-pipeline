@@ -5,16 +5,16 @@ from dataclasses import dataclass, field
 
 # Regex patterns matching standard resume section headings
 SECTION_HEADER_PATTERNS = [
-    (r"(?i)^(?:professional\s+summary|summary|profile|about\s+me|career\s+objective|objective)\b", "SUMMARY"),
-    (r"(?i)^(?:work\s+experience|professional\s+experience|experience|employment\s+history|career\s+history|work\s+history)\b", "EXPERIENCE"),
-    (r"(?i)^(?:education|academic\s+background|academic\s+qualifications|qualifications|degrees)\b", "EDUCATION"),
-    (r"(?i)^(?:technical\s+skills|core\s+competencies|skills\s*&\s*competencies|skills\s*&\s*abilities|skills|technologies|tools\s*&\s*technologies)\b", "SKILLS"),
-    (r"(?i)^(?:projects|key\s+projects|selected\s+projects|personal\s+projects)\b", "PROJECTS"),
-    (r"(?i)^(?:certifications|certificates|licenses\s*&\s*certifications|licenses)\b", "CERTIFICATIONS"),
-    (r"(?i)^(?:publications|research|papers)\b", "PUBLICATIONS"),
-    (r"(?i)^(?:awards|honors|achievements|accolades)\b", "AWARDS"),
-    (r"(?i)^(?:languages|language\s+proficiency)\b", "LANGUAGES"),
-    (r"(?i)^(?:volunteer|extracurricular|interests|hobbies)\b", "ADDITIONAL"),
+    (r"(?i)^(?:professional\s+summary|executive\s+summary|summary|profile|about\s+me|career\s+objective|objective|overview|personal\s+statement)\b", "SUMMARY"),
+    (r"(?i)^(?:work\s+experience|professional\s+experience|experience|employment\s+history|career\s+history|work\s+history|employment|experience\s*&\s*projects|career\s+highlights|relevant\s+experience)\b", "EXPERIENCE"),
+    (r"(?i)^(?:education\s*&\s*training|education\s*&\s*certifications|education|academic\s+background|academic\s+qualifications|academic\s+history|qualifications|degrees)\b", "EDUCATION"),
+    (r"(?i)^(?:technical\s+skills|technical\s+proficiencies|technical\s+toolbox|core\s+competencies|core\s+skills|areas\s+of\s+expertise|skills\s*&\s*expertise|skills\s*&\s*competencies|skills\s*&\s*abilities|skills\s*&\s*tools|skills|technologies|tools\s*&\s*technologies|tech\s+stack|proficiencies)\b", "SKILLS"),
+    (r"(?i)^(?:projects|key\s+projects|selected\s+projects|personal\s+projects|notable\s+projects|portfolio\s+projects)\b", "PROJECTS"),
+    (r"(?i)^(?:certifications|certificates|licenses\s*&\s*certifications|licenses|courses\s*&\s*certifications|accreditations)\b", "CERTIFICATIONS"),
+    (r"(?i)^(?:publications|research|papers|patents\s*&\s*publications|patents)\b", "PUBLICATIONS"),
+    (r"(?i)^(?:awards\s*&\s*honors|awards|honors|achievements|accolades)\b", "AWARDS"),
+    (r"(?i)^(?:languages|language\s+proficiency|known\s+languages)\b", "LANGUAGES"),
+    (r"(?i)^(?:volunteer\s+experience|volunteering|volunteer|extracurricular|interests|hobbies|activities)\b", "ADDITIONAL"),
 ]
 
 MAX_CHUNK_CHAR_SIZE = 1200  # ~250-300 tokens
@@ -78,7 +78,7 @@ def chunk_cv_text(raw_text: str) -> List[TextChunk]:
                 if sec_text:
                     sections.append({"section": current_section, "text": sec_text})
             current_section = matched_section
-            current_lines = [line]
+            current_lines = []
         else:
             current_lines.append(line)
 
