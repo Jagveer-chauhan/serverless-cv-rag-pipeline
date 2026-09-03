@@ -49,8 +49,20 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         cand = extract.get("candidate") or extract.get("candidate_info")
         if cand and isinstance(cand, dict):
             for k, v in cand.items():
-                if v and not merged_candidate.get(k):
-                    merged_candidate[k] = v
+                if v:
+                    if k == "links":
+                        curr_links = merged_candidate.get("links") or []
+                        if isinstance(curr_links, dict):
+                            curr_links = list(curr_links.values())
+                        elif not isinstance(curr_links, list):
+                            curr_links = [curr_links]
+                        
+                        new_links = v if isinstance(v, list) else (list(v.values()) if isinstance(v, dict) else [v])
+                        combined = list(dict.fromkeys([l for l in curr_links + new_links if l and isinstance(l, str)]))
+                        if combined:
+                            merged_candidate["links"] = combined
+                    elif not merged_candidate.get(k):
+                        merged_candidate[k] = v
 
         # 2. Summary
         summ = extract.get("summary")
@@ -240,6 +252,24 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         soft_skills=soft_skills
     )
 
+    # Route custom sections that are actually projects into merged_projects
+    remaining_sections = []
+    for s in merged_sections:
+        h = str(s.get("heading", "")).strip()
+        c = str(s.get("content", "")).strip()
+        h_lower = h.lower()
+        is_proj = (
+            any(kw in h_lower for kw in ["project", "system", "portal", "platform", "app", "cbfc", "jobiq", "composer"])
+            or (len(h) < 60 and any(kw in c.lower() for kw in ["developer for", "implemented", "built", "architected", "sole backend"]))
+        )
+        if is_proj:
+            merged_projects.append({
+                "name": h,
+                "description": c
+            })
+        else:
+            remaining_sections.append(s)
+
     # Deduplicate Certifications
     deduped_certs = _deduplicate_by_name(merged_certifications, key="name", model_cls=CertificationItem)
 
@@ -290,7 +320,7 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
     # Deduplicate custom sections by heading
     deduped_sections = []
     seen_sec_headings = set()
-    for s in merged_sections:
+    for s in remaining_sections:
         h = str(s.get("heading", "")).strip().lower()
         if h and h not in seen_sec_headings:
             seen_sec_headings.add(h)
@@ -379,6 +409,12 @@ def _deduplicate_work_experience(items: List[Dict[str, Any]]) -> List[WorkExperi
     for val in seen.values():
         val.setdefault("company", "Company")
         val.setdefault("title", "Role")
+        # If description is identical to achievements, don't duplicate
+        desc = val.get("description")
+        achs = val.get("achievements", [])
+        if desc and achs:
+            if desc in achs or any(desc.strip() == a.strip() for a in achs):
+                val["description"] = None
         res.append(WorkExperienceItem.model_validate(val))
     return res
 
@@ -390,15 +426,28 @@ def _deduplicate_education(items: List[Dict[str, Any]]) -> List[EducationItem]:
         deg = str(it.get("degree", "")).strip()
         if not inst and not deg:
             continue
-        if deg.lower() in ("degree / study", "degree") and inst.lower() in ("university", ""):
+        if deg.lower() in ("degree / study", "degree") and inst.lower() in ("university", "university / college", ""):
             continue
         if "relevant training" in deg.lower() or "certifications" in deg.lower():
             continue
-        key = (inst.lower(), deg.lower())
+        
+        # Normalize key by degree
+        key = deg.lower()
         if key not in seen:
-            it["institution"] = inst or "University"
+            it["institution"] = inst or "University / College"
             it["degree"] = deg or "Degree"
             seen[key] = it
+        else:
+            existing = seen[key]
+            if existing["institution"] in ("University", "University / College", "") and inst not in ("University", "University / College", ""):
+                existing["institution"] = inst
+            if not existing.get("start_date") and it.get("start_date"):
+                existing["start_date"] = it.get("start_date")
+                existing["start_year"] = it.get("start_year")
+            if not existing.get("end_date") and it.get("end_date"):
+                existing["end_date"] = it.get("end_date")
+                existing["end_year"] = it.get("end_year")
+
     return [EducationItem.model_validate(val) for val in seen.values()]
 
 

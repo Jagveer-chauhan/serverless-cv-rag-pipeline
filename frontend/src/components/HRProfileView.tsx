@@ -80,7 +80,7 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
         if (!prev.end_date && item.end_date) prev.end_date = item.end_date
         if (!prev.location && item.location) prev.location = item.location
       } else {
-        // Parse location if contained in company string (e.g. "Forviz Mazars, Gurugram")
+        // Parse location if contained in company string (e.g. "Forvis Mazars, Gurugram" or "Forvis Mazars in IndiaGurugram")
         let cleanCompany = company
         let loc = item.location || null
         if (!loc && company.includes(',')) {
@@ -88,6 +88,20 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
           if (parts.length >= 2 && parts[parts.length - 1].length < 30) {
             loc = parts[parts.length - 1]
             cleanCompany = parts.slice(0, -1).join(', ')
+          }
+        }
+        if (!loc) {
+          const knownCities = [
+            'Gurugram', 'Gurgaon', 'Faridabad', 'Noida', 'Delhi', 'Bengaluru', 'Bangalore',
+            'Hyderabad', 'Pune', 'Mumbai', 'Chennai', 'Kolkata', 'Ahmedabad', 'Jaipur',
+            'London', 'Berlin', 'San Francisco', 'Austin', 'New York', 'Chicago', 'Seattle'
+          ]
+          for (const city of knownCities) {
+            if (cleanCompany.endsWith(city) && cleanCompany.length > city.length + 3) {
+              loc = city
+              cleanCompany = cleanCompany.slice(0, -city.length).replace(/[\s,–—-]+$/, '').trim()
+              break
+            }
           }
         }
 
@@ -149,15 +163,29 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
   const rawProjects = parsedData.projects || []
   const rawSections = parsedData.sections || []
 
-  // If projects are inside sections, separate them
+  // If projects are inside sections or standalone, collect them
   const projectList: any[] = Array.isArray(rawProjects) ? [...rawProjects] : []
   const customSectionList: any[] = []
 
   if (Array.isArray(rawSections)) {
     rawSections.forEach((sec: any) => {
       const heading = (sec.heading || '').toLowerCase()
-      if (heading.includes('project') || heading.includes('system') || heading.includes('portal') || heading.includes('app')) {
-        // If not already in project list
+      const content = (sec.content || '').toLowerCase()
+      const isProject = (
+        heading.includes('project') ||
+        heading.includes('system') ||
+        heading.includes('portal') ||
+        heading.includes('app') ||
+        heading.includes('cbfc') ||
+        heading.includes('jobiq') ||
+        heading.includes('composer') ||
+        content.includes('developer for') ||
+        content.includes('sole backend') ||
+        content.includes('implemented') ||
+        content.includes('architected')
+      )
+
+      if (isProject) {
         if (!projectList.some((p: any) => (p.name || p.heading) === sec.heading)) {
           projectList.push({
             name: sec.heading,
@@ -353,9 +381,10 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
                     )}
                   </div>
 
-                  {exp.description && (
-                    <p className="text-xs text-slate-300 leading-relaxed">{exp.description}</p>
-                  )}
+                  {exp.description &&
+                    !achievements.some((ach: string) => typeof ach === 'string' && ach.trim() === exp.description.trim()) && (
+                      <p className="text-xs text-slate-300 leading-relaxed">{exp.description}</p>
+                    )}
 
                   {/* Achievements */}
                   {achievements.length > 0 && (
