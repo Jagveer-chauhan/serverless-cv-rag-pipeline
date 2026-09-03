@@ -273,55 +273,90 @@ class LLMExtractor:
 
             for line in lines:
                 d_match = date_regex.search(line)
-                has_separators = (" | " in line or " at " in line or " @ " in line)
-                is_bullet = bool(re.match(r"^[-•*–—]\s*", line)) or (":" in line and len(line.split(":")[0]) < 35 and len(line) > 80 and not d_match)
+                has_separators = (" | " in line or "|" in line or " at " in line or " @ " in line or " — " in line or " – " in line)
+                is_bullet = bool(re.match(r"^[-•*–—\t]\s*", line)) or (":" in line and len(line.split(":")[0]) < 35 and len(line) > 80 and not d_match)
                 is_new_job_header = (d_match and not is_bullet) or (has_separators and d_match)
 
                 if is_new_job_header:
                     if current_job:
                         jobs.append(current_job)
 
-                    header_text = line
                     start_date = None
                     end_date = None
+                    clean_line = line
                     if d_match:
                         start_date = d_match.group(1).strip()
                         end_date = d_match.group(2).strip()
-                        header_text = header_text.replace(d_match.group(0), "").strip(" ,|–—-")
+                        clean_line = clean_line[:d_match.start()] + clean_line[d_match.end():]
+                    clean_line = clean_line.strip(" ()-,|–—\t")
 
                     company = "Company"
-                    position = "Software Engineer"
+                    title = "Role"
+                    location = None
 
-                    if " | " in header_text:
-                        parts = [p.strip() for p in header_text.split(" | ") if p.strip()]
-                        if len(parts) >= 2:
-                            p0, p1 = parts[0], parts[1]
-                            if any(kw in p1.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "scientist", "consultant", "analyst", "designer"]):
-                                company, position = p0, p1
-                            elif any(kw in p0.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "scientist", "consultant", "analyst", "designer"]):
-                                position, company = p0, p1
+                    pipe_parts = [p.strip() for p in clean_line.split("|") if p.strip()]
+                    if pipe_parts:
+                        part0 = pipe_parts[0]
+                        # Check if part0 has em-dash / en-dash / ' - ' separator between Title and Company
+                        dash_m = re.split(r"\s+[—–-]\s+", part0, maxsplit=1)
+                        if len(dash_m) == 2:
+                            p_a, p_b = dash_m[0].strip(), dash_m[1].strip()
+                            if any(kw in p_a.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "designer"]):
+                                title, company = p_a, p_b
                             else:
-                                company, position = p0, p1
-                    elif " at " in header_text:
-                        parts = header_text.split(" at ", 1)
-                        position, company = parts[0].strip(), parts[1].strip()
-                    elif " - " in header_text:
-                        parts = header_text.split(" - ", 1)
-                        company, position = parts[0].strip(), parts[1].strip()
-                    else:
-                        position = header_text
+                                company, title = p_a, p_b
+                            
+                            # Remaining pipe parts are location or dedicated team
+                            rem = pipe_parts[1:]
+                            for r in rem:
+                                if any(kw in r.lower() for kw in ["team", "client", "dedicated"]):
+                                    company = f"{company} ({r})"
+                                elif not location and len(r) < 40:
+                                    location = r
+                        elif len(pipe_parts) >= 2:
+                            p0, p1 = pipe_parts[0], pipe_parts[1]
+                            if any(kw in p1.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "designer"]):
+                                company, title = p0, p1
+                            elif any(kw in p0.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "designer"]):
+                                title, company = p0, p1
+                            else:
+                                company, title = p0, p1
+
+                            # If remaining parts exist
+                            for r in pipe_parts[2:]:
+                                if any(kw in r.lower() for kw in ["team", "client", "dedicated"]):
+                                    company = f"{company} ({r})"
+                                elif not location and len(r) < 40:
+                                    location = r
+
+                            if "," in company and not location:
+                                c_parts = [cp.strip() for cp in company.split(",")]
+                                if len(c_parts) >= 2 and len(c_parts[-1]) < 30 and not any(kw in c_parts[-1].lower() for kw in ["inc", "llc", "ltd", "corp", "usa"]):
+                                    location = c_parts[-1]
+                                    company = ", ".join(c_parts[:-1])
+                        else:
+                            # Single part
+                            if " at " in part0:
+                                parts = part0.split(" at ", 1)
+                                title, company = parts[0].strip(), parts[1].strip()
+                            elif " — " in part0 or " – " in part0:
+                                parts = re.split(r"\s+[—–]\s+", part0, maxsplit=1)
+                                title, company = parts[0].strip(), parts[1].strip()
+                            else:
+                                title = part0
 
                     clean_company = company.strip(" ,|–—-")
-                    clean_pos = position.strip(" ,|–—-")
+                    clean_pos = title.strip(" ,|–—-")
                     if clean_pos.count("(") > clean_pos.count(")"):
                         clean_pos += ")"
                     if clean_company.count("(") > clean_company.count(")"):
                         clean_company += ")"
 
                     current_job = {
-                        "company": clean_company,
-                        "position": clean_pos,
-                        "title": clean_pos,
+                        "company": clean_company or "Company",
+                        "position": clean_pos or "Role",
+                        "title": clean_pos or "Role",
+                        "location": location,
                         "start_date": start_date,
                         "end_date": end_date,
                         "key_achievements": [],
@@ -331,7 +366,7 @@ class LLMExtractor:
                         "description_lines": []
                     }
                 elif current_job:
-                    clean_l = re.sub(r"^[-•*–—]\s*", "", line)
+                    clean_l = re.sub(r"^[-•*–—\t]+\s*", "", line)
                     current_job["key_achievements"].append(clean_l)
                     current_job["achievements"].append(clean_l)
                     current_job["description_lines"].append(clean_l)
@@ -354,63 +389,71 @@ class LLMExtractor:
             clean_content = re.sub(r"(?i)^(?:education|academic\s+background|academic\s+qualifications|qualifications|degrees)\s*\n+", "", clean_content).strip()
             lines = [l.strip() for l in clean_content.splitlines() if l.strip()]
             
+            month_pattern = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|[0-9]{1,2}/)?\s*\d{4}(?:-[0-9]{1,2})?"
+            date_regex = re.compile(rf"(?:\((?:from\s+)?|\b)({month_pattern})\s*(?:-|–|—|to)\s*({month_pattern}|Present|Current|Now)\)?", re.I)
+
             i = 0
             while i < len(lines):
                 line = lines[i]
+                line = re.sub(r"^[-•*–—\t]+\s*", "", line).strip()
+                if not line or len(line) < 4:
+                    i += 1
+                    continue
+
                 if re.match(r"(?i)^(?:relevant\s+training|training|certifications)", line):
                     i += 1
                     continue
-                
-                if re.match(r"^\b\d{4}\b$", line):
-                    i += 1
-                    continue
 
-                inst = line
-                deg = None
-                start_year = None
-                end_year = None
+                # Extract date range
+                d_match = date_regex.search(line)
+                start_date = None
+                end_date = None
+                clean_l = line
+                if d_match:
+                    start_date = d_match.group(1).strip()
+                    end_date = d_match.group(2).strip()
+                    clean_l = clean_l[:d_match.start()] + clean_l[d_match.end():]
+                clean_l = clean_l.strip(" ()-,|–—\t")
 
-                # Extract date ranges like (2010-09 to 2014-06)
-                date_match = re.search(r"(?:\((?:from\s+)?|\b)((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|[0-9]{1,2}/)?\s*\d{4}(?:-[0-9]{1,2})?)\s*(?:-|–|to)?\s*(\d{4}(?:-[0-9]{1,2})?|Present|Current|Now)?\)?", line, re.I)
-                if date_match:
-                    start_year = date_match.group(1).strip()
-                    end_year = date_match.group(2).strip() if date_match.group(2) else start_year
-                    inst = inst.replace(date_match.group(0), "").strip(" ()-,|")
+                institution = "University"
+                degree = None
 
-                if " | " in inst:
-                    parts = [p.strip() for p in inst.split(" | ") if p.strip()]
-                    if len(parts) >= 2:
-                        inst, deg = parts[0], parts[1]
-                elif " - " in inst:
-                    parts = [p.strip() for p in inst.split(" - ") if p.strip()]
-                    if len(parts) >= 2:
-                        inst, deg = parts[0], parts[1]
+                # Check delimiter: ' — ' or ' – ' or ' | '
+                if " — " in clean_l:
+                    parts = clean_l.split(" — ", 1)
+                    degree, institution = parts[0].strip(), parts[1].strip()
+                elif " – " in clean_l:
+                    parts = clean_l.split(" – ", 1)
+                    degree, institution = parts[0].strip(), parts[1].strip()
+                elif " | " in clean_l:
+                    parts = clean_l.split(" | ", 1)
+                    p0, p1 = parts[0].strip(), parts[1].strip()
+                    if any(kw in p0.lower() for kw in ["bachelor", "master", "mca", "bca", "b.s", "m.s", "b.tech", "m.tech", "ph.d", "diploma", "associate"]):
+                        degree, institution = p0, p1
+                    else:
+                        institution, degree = p0, p1
+                else:
+                    deg_m = re.search(r"(?i)\b(B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?A\.?|M\.?C\.?A\.?|B\.?C\.?A\.?|B\.?Tech|M\.?Tech|Ph\.?D\.?|Bachelor[s]?|Master[s]?|Doctorate|Associate|Diploma|Degree)(?:\s+(?:of|in)\s+[A-Za-z\s&,]+)?", clean_l)
+                    if deg_m:
+                        degree = deg_m.group(0).strip()
+                        institution = clean_l.replace(degree, "").strip(" ()-,|–—\t") or "University"
+                    else:
+                        institution = clean_l
+                        if i + 1 < len(lines):
+                            next_l = lines[i + 1]
+                            next_deg = re.search(r"(?i)\b(B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?A\.?|M\.?C\.?A\.?|B\.?C\.?A\.?|B\.?Tech|M\.?Tech|Ph\.?D\.?|Bachelor[s]?|Master[s]?|Doctorate|Associate|Diploma|Degree)(?:\s+(?:of|in)\s+[A-Za-z\s&,]+)?", next_l)
+                            if next_deg:
+                                degree = next_deg.group(0).strip()
+                                i += 1
 
-                # If degree not inline, check if next line is degree
-                if not deg and i + 1 < len(lines):
-                    next_l = lines[i + 1]
-                    if not re.match(r"^\b\d{4}\b$", next_l) and not any(kw in next_l.lower() for kw in ["university", "college", "institute", "school"]):
-                        deg = next_l
-                        i += 1
-
-                # Check if next line is year
-                if i + 1 < len(lines):
-                    next_l = lines[i + 1]
-                    y_m = re.search(r"\b(19\d\d|20\d\d)\b", next_l)
-                    if y_m:
-                        end_year = y_m.group(1)
-                        start_year = end_year
-                        i += 1
-
-                if inst:
-                    edu_items.append({
-                        "institution": inst,
-                        "degree": deg or "Degree / Study",
-                        "start_year": start_year,
-                        "end_year": end_year,
-                        "start_date": start_year,
-                        "end_date": end_year,
-                    })
+                edu_items.append({
+                    "degree": degree or "Degree / Study",
+                    "institution": institution or "University",
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "start_year": start_date,
+                    "end_year": end_date,
+                })
                 i += 1
 
             data["education"] = edu_items or [{"institution": "University", "degree": "Degree"}]
@@ -423,7 +466,7 @@ class LLMExtractor:
             explicit_skills = []
 
             for line in skills_text.splitlines():
-                line = line.strip()
+                line = re.sub(r"^[-•*–—\t]+\s*", "", line).strip()
                 if not line:
                     continue
                 if ":" in line:
@@ -444,35 +487,65 @@ class LLMExtractor:
         elif section == "PROJECTS":
             clean_content = re.sub(r"^\[PROJECTS(?:.*?)]\s*", "", content, flags=re.I).strip()
             clean_content = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", clean_content, flags=re.I).strip()
-            clean_content = re.sub(r"(?i)^(?:key\s+projects|projects|selected\s+projects)\s*\n+", "", clean_content).strip()
+            clean_content = re.sub(r"(?i)^(?:selected\s+projects|key\s+projects|projects|technical\s+projects|notable\s+projects)\s*\n+", "", clean_content).strip()
 
-            raw_blocks = re.split(r"\n\s*\n|(?<=\n)(?=[A-Z0-9][A-Za-z0-9\s,&/().–—-]+(?:\s*\|\s*|\s*–\s*|\s*-\s*)(?:Lead|Senior|Full-Stack|Core|Solo|Developer|Architect|Engineer|Designer))", clean_content)
-            
+            lines = [l.strip() for l in clean_content.splitlines() if l.strip()]
             projects = []
-            for b in raw_blocks:
-                b = b.strip()
-                if not b or len(b) < 10:
-                    continue
-                lines = [l.strip() for l in b.splitlines() if l.strip()]
-                if not lines:
-                    continue
-                
-                header = lines[0]
-                name = header
-                role = None
-                if " | " in header:
-                    parts = [p.strip() for p in header.split(" | ") if p.strip()]
-                    name = parts[0]
-                    if len(parts) > 1:
-                        role = parts[1]
-                
-                desc_lines = lines[1:] if len(lines) > 1 else [lines[0]]
-                desc = "\n".join(desc_lines)
-                projects.append({
-                    "name": name,
-                    "role": role,
-                    "description": desc
-                })
+            current_proj = None
+
+            for line in lines:
+                is_bullet = bool(re.match(r"^[-•*–—\t]\s*", line))
+                has_pipe = " | " in line or "|" in line
+                has_dash_separator = bool(re.search(r"\s+[—–-]\s+", line))
+                is_proj_header = not is_bullet and (has_pipe or (has_dash_separator and len(line) < 120 and not line.endswith(".")))
+
+                if is_proj_header:
+                    if current_proj:
+                        projects.append(current_proj)
+
+                    pipe_parts = [p.strip() for p in line.split("|") if p.strip()]
+                    name = pipe_parts[0] if pipe_parts else line
+                    role = None
+                    tech_stack = []
+                    links = []
+
+                    if " — " in name:
+                        n_parts = name.split(" — ", 1)
+                        name, role = n_parts[0].strip(), n_parts[1].strip()
+                    elif " – " in name:
+                        n_parts = name.split(" – ", 1)
+                        name, role = n_parts[0].strip(), n_parts[1].strip()
+                    elif " - " in name and len(name.split(" - ")[0]) > 4:
+                        n_parts = name.split(" - ", 1)
+                        if any(kw in n_parts[1].lower() for kw in ["learning", "portal", "platform", "app", "system", "plugin", "builder", "freshers", "edtech"]):
+                            name, role = n_parts[0].strip(), n_parts[1].strip()
+
+                    for p in pipe_parts[1:]:
+                        if any(kw in p.lower() for kw in ["developer", "designer", "architect", "lead", "engineer", "manager", "author"]):
+                            role = p
+                        elif any(kw in p.lower() for kw in ["http", "github.com", "linkedin", ".in", ".com", ".org", "downloads", "visitors", "stars"]):
+                            links.append(p)
+                        elif "," in p or any(kw in p.lower() for kw in ["php", "laravel", "react", "node", "python", "sql", "mongo", "aws", "express", "vue", "docker"]):
+                            tech_stack.extend([t.strip() for t in re.split(r"[,;]+", p) if t.strip()])
+                        elif not role:
+                            role = p
+
+                    current_proj = {
+                        "name": name.strip(" ,|–—-"),
+                        "role": role.strip(" ,|–—-") if role else None,
+                        "technologies": tech_stack,
+                        "links": links,
+                        "description_lines": []
+                    }
+                elif current_proj:
+                    clean_l = re.sub(r"^[-•*–—\t]+\s*", "", line)
+                    current_proj["description_lines"].append(clean_l)
+
+            if current_proj:
+                projects.append(current_proj)
+
+            for p in projects:
+                p["description"] = "\n".join(p.pop("description_lines"))
 
             data["projects"] = projects or [{"name": "Key Projects", "description": clean_content}]
 
@@ -482,7 +555,7 @@ class LLMExtractor:
             clean_content = re.sub(r"(?i)^(?:relevant\s+training\s*&\s*certifications|certifications\s*&\s*training|certifications|certificates|licenses|training)\s*\n+", "", clean_content).strip()
             cert_items = []
             for l in clean_content.splitlines():
-                l = l.strip(" -•*")
+                l = re.sub(r"^[-•*–—\t]+\s*", "", l).strip()
                 if not l or len(l) < 4:
                     continue
                 
