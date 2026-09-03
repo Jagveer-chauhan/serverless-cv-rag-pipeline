@@ -30,6 +30,7 @@ class WorkExperienceItem(DynamicBaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     duration_months: Optional[int] = None
+    location: Optional[str] = None
     description: Optional[str] = None
     technologies: List[str] = Field(default_factory=list, alias="technologies_used")
     achievements: List[str] = Field(default_factory=list, alias="key_achievements")
@@ -41,6 +42,7 @@ class EducationItem(DynamicBaseModel):
     degree: Optional[str] = None
     start_date: Optional[str] = Field(default=None, alias="start_year")
     end_date: Optional[str] = Field(default=None, alias="end_year")
+    location: Optional[str] = None
     gpa: Optional[Union[str, float]] = None
     notes: Optional[str] = Field(default=None, alias="honors")
 
@@ -116,13 +118,12 @@ class ProcessingMetadata(DynamicBaseModel):
     rag_ready_at: Optional[str] = None
     extraction_time_ms: Optional[float] = None
     chunks_used: int = 0
-    retry_count: int = 0
     # Cold-start tracking (required by spec §3.6)
-    cold_start: bool = False
-    cold_start_ms: Optional[float] = None          # Time from boot → first inference
-    first_inference_ms: Optional[float] = None     # Latency of first LLM call
-    warm_inference_ms: Optional[float] = None      # Latency of warm subsequent calls
-    provider_queue_time_ms: Optional[float] = None # Provider-side queue latency (if available)
+    cold_start: bool = Field(default=False, alias="is_cold_start")
+    cold_start_ms: Optional[float] = Field(default=None, alias="model_loading_time_ms")
+    first_inference_ms: Optional[float] = None
+    warm_inference_ms: Optional[float] = None
+    provider_queue_time_ms: Optional[float] = None
     timing_ms: Dict[str, float] = Field(default_factory=dict)
 
 
@@ -142,6 +143,8 @@ class CVExtractionSchema(BaseModel):
     education: List[EducationItem] = Field(default_factory=list)
     skills: Optional[Union[SkillsBlock, List[Any], Dict[str, Any]]] = None
     certifications: List[CertificationItem] = Field(default_factory=list)
+    projects: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
+    awards: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
     derived: Optional[DerivedInsights] = None
     inferred: Optional[InferredSignals] = None
     sections: List[CustomSection] = Field(
