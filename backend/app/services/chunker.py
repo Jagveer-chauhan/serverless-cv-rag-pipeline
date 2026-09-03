@@ -5,16 +5,16 @@ from dataclasses import dataclass, field
 
 # Regex patterns matching standard resume section headings
 SECTION_HEADER_PATTERNS = [
-    (r"(?i)^(?:professional\s+summary|executive\s+summary|career\s+summary|summary|profile|about\s+me|career\s+objective|objective|personal\s+statement)\b", "SUMMARY"),
-    (r"(?i)^(?:work\s+experience|professional\s+experience|experience|employment\s+history|career\s+history|work\s+history|employment|experience\s*&\s*projects|career\s+highlights|relevant\s+experience)\b", "EXPERIENCE"),
-    (r"(?i)^(?:relevant\s+training\s*&\s*certifications|certifications\s*&\s*training|training\s*&\s*certifications|certifications|certificates|licenses\s*&\s*certifications|licenses|courses\s*&\s*certifications|accreditations|courses|training|relevant\s+training)\b", "CERTIFICATIONS"),
-    (r"(?i)^(?:education\s*&\s*training|education\s*&\s*certifications|education|academic\s+background|academic\s+qualifications|academic\s+history|qualifications|degrees)\b", "EDUCATION"),
-    (r"(?i)^(?:core\s+technical\s+skills|technical\s+skills|technical\s+proficiencies|technical\s+toolbox|core\s+competencies|core\s+skills|areas\s+of\s+expertise|skills\s*&\s*expertise|skills\s*&\s*competencies|skills\s*&\s*abilities|skills\s*&\s*tools|skills|technologies|tools\s*&\s*technologies|tech\s+stack|proficiencies)\b", "SKILLS"),
-    (r"(?i)^(?:key\s+projects|projects|selected\s+projects|personal\s+projects|notable\s+projects|portfolio\s+projects|major\s+projects|project\s+experience)\b", "PROJECTS"),
-    (r"(?i)^(?:publications|research|papers|patents\s*&\s*publications|patents)\b", "PUBLICATIONS"),
-    (r"(?i)^(?:awards\s*&\s*honors|awards|honors|achievements|accolades)\b", "AWARDS"),
-    (r"(?i)^(?:languages|language\s+proficiency|known\s+languages)\b", "LANGUAGES"),
-    (r"(?i)^(?:volunteer\s+experience|volunteering|volunteer|extracurricular|interests|hobbies|activities)\b", "ADDITIONAL"),
+    (r"(?i)^(?:professional\s+summary|executive\s+summary|career\s+summary|summary\s+of\s+qualifications|profile\s+summary|career\s+profile|summary|profile|about\s+me|about|career\s+objective|objective|personal\s+statement)\b", "SUMMARY"),
+    (r"(?i)^(?:work\s+experience|professional\s+experience|experience|employment\s+history|career\s+history|work\s+history|employment|experience\s*&\s*projects|career\s+highlights|relevant\s+experience|work\s+background|professional\s+background|internships?|internship\s+experience)\b", "EXPERIENCE"),
+    (r"(?i)^(?:relevant\s+training\s*&\s*certifications|certifications\s*&\s*training|training\s*&\s*certifications|certifications|certificates|licenses\s*&\s*certifications|licenses|licensures|courses\s*&\s*certifications|accreditations|courses|training|relevant\s+training|credentials|professional\s+certifications)\b", "CERTIFICATIONS"),
+    (r"(?i)^(?:education\s*&\s*training|education\s*&\s*certifications|education\s*&\s*qualifications|education|academic\s+background|academic\s+qualifications|academic\s+history|academic\s+credentials|qualifications|academics|degrees)\b", "EDUCATION"),
+    (r"(?i)^(?:core\s+technical\s+skills|technical\s+skills|technical\s+proficiencies|technical\s+toolbox|technical\s+expertise|core\s+competencies|core\s+skills|areas\s+of\s+expertise|skills\s*&\s*expertise|skills\s*&\s*competencies|skills\s*&\s*abilities|skills\s*&\s*tools|skills\s*/\s*tools|skills|key\s+skills|it\s+skills|technologies|tools\s*&\s*technologies|tech\s+stack|proficiencies|competencies)\b", "SKILLS"),
+    (r"(?i)^(?:key\s+projects|projects|selected\s+projects|personal\s+projects|notable\s+projects|portfolio\s+projects|major\s+projects|project\s+experience|academic\s+projects|software\s+projects|open\s+source(?:\s+contributions)?)\b", "PROJECTS"),
+    (r"(?i)^(?:publications\s*&\s*research|research\s*&\s*publications|publications|research\s+papers|research|papers|patents\s*&\s*publications|patents|journals\s*&\s*conferences)\b", "PUBLICATIONS"),
+    (r"(?i)^(?:awards\s*&\s*honors|awards\s*&\s*achievements|honors\s*&\s*awards|awards|honors|achievements|accolades|accomplishments)\b", "AWARDS"),
+    (r"(?i)^(?:languages\s+known|language\s+proficiencies|language\s+proficiency|known\s+languages|languages)\b", "LANGUAGES"),
+    (r"(?i)^(?:volunteer\s+experience|volunteering|volunteer\s+work|volunteer|extracurricular\s+activities|extracurricular|interests|hobbies\s*&\s*interests|hobbies|activities|leadership\s+activities|leadership)\b", "ADDITIONAL"),
 ]
 
 MAX_CHUNK_CHAR_SIZE = 1200  # ~250-300 tokens
@@ -63,9 +63,12 @@ def chunk_cv_text(raw_text: str) -> List[TextChunk]:
 
         # Check if line matches a known section header
         matched_section = None
-        # Headers are usually short (< 50 chars) and standalone or formatted
-        if len(stripped) < 60:
+        # Headers are usually short (< 70 chars) and standalone or formatted
+        if len(stripped) < 70:
+            # Strip markdown (#, *), bullet markers, numbers ("1. ", "II. "), and trailing colons
             clean_line = re.sub(r"^[\s#*_\-–—]+|[\s:*_\-–—]+$", "", stripped).strip()
+            clean_line = re.sub(r"^(?:[0-9]+|[A-Za-z]|[IVXLCDM]+)[\.\)\-]\s*", "", clean_line).strip()
+            clean_line = re.sub(r"^[\s#*_\-–—]+|[\s:*_\-–—]+$", "", clean_line).strip()
             for pattern, sec_name in SECTION_HEADER_PATTERNS:
                 if re.match(pattern, clean_line):
                     matched_section = sec_name

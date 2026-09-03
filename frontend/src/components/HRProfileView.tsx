@@ -13,11 +13,19 @@ import {
   Calendar,
   Layers,
   Sparkles,
-  Trophy
+  Trophy,
+  BookOpen,
+  Languages as LanguagesIcon
 } from 'lucide-react'
 
 interface HRProfileViewProps {
   parsedData: any
+}
+
+function cleanField(val?: any): string | null {
+  if (!val || typeof val !== 'string') return null
+  const cleaned = val.replace(/^(?:email|phone|tel|mobile|cell|location|address|city|linkedin|github|portfolio)\s*[:|–—-]\s*/i, '').trim()
+  return cleaned.replace(/^[\s,|–—-]+|[\s,|–—-]+$/, '').trim() || null
 }
 
 export function HRProfileView({ parsedData }: HRProfileViewProps) {
@@ -31,6 +39,11 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
 
   // 1. Candidate Info
   const candidate = parsedData.candidate || parsedData.candidate_info || {}
+  const candidateName = candidate.name && candidate.name !== 'Candidate' ? candidate.name : 'Candidate'
+  const candidateTitle = cleanField(candidate.title || candidate.position)
+  const candidateEmail = cleanField(candidate.email)
+  const candidatePhone = cleanField(candidate.phone)
+  const candidateLocation = cleanField(candidate.location)
   const summary = parsedData.summary || candidate.summary
 
   // 2. Experience normalization & bundling
@@ -162,9 +175,18 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
   // 6. Certifications & Training
   const certifications = Array.isArray(parsedData.certifications) ? parsedData.certifications : []
 
-  // 7. Awards / Leadership Signals
+  // 7. Publications & Research
+  const rawPublications = parsedData.publications || []
+  const publications = Array.isArray(rawPublications) ? rawPublications : []
+
+  // 8. Awards / Leadership Signals
   const rawAwards = parsedData.awards || []
   const awards = Array.isArray(rawAwards) ? rawAwards : []
+
+  // 9. Languages
+  const rawLanguages = parsedData.languages || parsedData.derived?.languages || []
+  const languages = Array.isArray(rawLanguages) ? rawLanguages : []
+
   const leadershipSignals = parsedData.inferred?.leadership_signals || []
 
   // Helper to format structured project description lines
@@ -208,41 +230,41 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-start space-x-4">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xl font-mono flex-shrink-0 shadow-inner">
-              {candidate.name && candidate.name !== 'Candidate Name' ? (
-                candidate.name.charAt(0).toUpperCase()
+              {candidateName && candidateName !== 'Candidate' ? (
+                candidateName.charAt(0).toUpperCase()
               ) : (
                 <User className="w-7 h-7" />
               )}
             </div>
             <div>
               <h2 className="text-lg font-bold text-white tracking-tight">
-                {candidate.name || 'Candidate Name'}
+                {candidateName}
               </h2>
-              {(candidate.title || candidate.position) && (
+              {candidateTitle && (
                 <p className="text-xs text-emerald-400 font-semibold mt-0.5 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                  <span>{candidate.title || candidate.position}</span>
+                  <span>{candidateTitle}</span>
                 </p>
               )}
 
               {/* Contact meta pills */}
               <div className="flex flex-wrap gap-2.5 mt-3 text-[11px] text-slate-400 font-mono">
-                {candidate.email && (
+                {candidateEmail && (
                   <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
                     <Mail className="w-3.5 h-3.5 text-emerald-400" />
-                    {candidate.email}
+                    {candidateEmail}
                   </span>
                 )}
-                {candidate.phone && (
+                {candidatePhone && (
                   <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
                     <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                    {candidate.phone}
+                    {candidatePhone}
                   </span>
                 )}
-                {candidate.location && (
+                {candidateLocation && (
                   <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
                     <MapPin className="w-3.5 h-3.5 text-cyan-400" />
-                    {candidate.location}
+                    {candidateLocation}
                   </span>
                 )}
               </div>
@@ -425,7 +447,7 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
               const projName = proj.name || proj.heading || `Project ${idx + 1}`
               const projRole = proj.role || null
               const projDesc = proj.description || proj.content || ''
-              const projTech = proj.technologies || []
+              const projTech = proj.technologies || proj.technologies_used || []
 
               return (
                 <div
@@ -569,7 +591,64 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
         </div>
       )}
 
-      {/* 8. Awards & Honors (if present) */}
+      {/* 8. Publications & Research (if present) */}
+      {publications.length > 0 && (
+        <div className="w-full space-y-3.5">
+          <h3 className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <BookOpen className="w-4 h-4 text-emerald-400" />
+            Publications &amp; Research ({publications.length})
+          </h3>
+
+          <div className="w-full space-y-3">
+            {publications.map((pub: any, idx: number) => {
+              const pubTitle = typeof pub === 'string' ? pub : pub.title || pub.name || 'Publication'
+              const publisher = typeof pub === 'object' ? pub.publisher || pub.journal || null : null
+              const dateVal = typeof pub === 'object' ? pub.date || pub.year || null : null
+              const url = typeof pub === 'object' ? pub.link || pub.url || null : null
+              const desc = typeof pub === 'object' ? pub.description : null
+
+              return (
+                <div
+                  key={idx}
+                  className="w-full p-4 rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-emerald-500/40 space-y-1.5 transition-all shadow-sm"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                    <div className="space-y-1">
+                      <h4 className="font-bold text-white text-xs">{pubTitle}</h4>
+                      {publisher && (
+                        <p className="text-emerald-300 text-[11px] font-semibold flex items-center gap-1.5">
+                          <span>{publisher}</span>
+                        </p>
+                      )}
+                    </div>
+                    {dateVal && (
+                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] font-mono self-start">
+                        {dateVal}
+                      </span>
+                    )}
+                  </div>
+                  {desc && desc !== pubTitle && (
+                    <p className="text-xs text-slate-300 leading-relaxed pt-1">{desc}</p>
+                  )}
+                  {url && (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] text-emerald-400/80 hover:text-emerald-300 font-mono underline pt-1"
+                    >
+                      <Globe className="w-3 h-3" />
+                      View Publication
+                    </a>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 9. Honors & Awards (if present) */}
       {awards.length > 0 && (
         <div className="w-full space-y-3.5">
           <h3 className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -602,7 +681,36 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
         </div>
       )}
 
-      {/* 9. Additional Custom Sections */}
+      {/* 10. Spoken / Known Languages */}
+      {languages.length > 0 && (
+        <div className="w-full space-y-3.5">
+          <h3 className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <LanguagesIcon className="w-4 h-4 text-cyan-400" />
+            Languages
+          </h3>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {languages.map((l: any, idx: number) => {
+              const langName = typeof l === 'string' ? l : l.language || l.name || 'Language'
+              const proficiency = typeof l === 'object' ? l.proficiency || l.level : null
+              return (
+                <span
+                  key={idx}
+                  className="px-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-200 text-xs font-medium flex items-center gap-2"
+                >
+                  <span>{langName}</span>
+                  {proficiency && (
+                    <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 text-[10px] font-mono">
+                      {proficiency}
+                    </span>
+                  )}
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 11. Additional Custom Sections */}
       {customSectionList.length > 0 && (
         <div className="w-full space-y-3.5">
           {customSectionList.map((sec: any, idx: number) => (
@@ -617,7 +725,7 @@ export function HRProfileView({ parsedData }: HRProfileViewProps) {
         </div>
       )}
 
-      {/* 10. Leadership Signals / Inferred Insights (if available) */}
+      {/* 12. Leadership Signals / Inferred Insights (if available) */}
       {leadershipSignals.length > 0 && (
         <div className="w-full p-4 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-2 shadow-sm">
           <h3 className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">

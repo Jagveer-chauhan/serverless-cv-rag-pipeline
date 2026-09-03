@@ -137,7 +137,11 @@ def test_chunk_extraction_schema_with_dynamic_sections():
     assert merged.experience[0].title == "Staff Engineer"
     assert "English" in merged.derived.languages
     assert "Mandarin" in merged.derived.languages
-    assert any("Distributed Cache" in s.heading or "Distributed Cache" in s.content for s in merged.sections)
+    assert len(merged.projects) == 1
+    assert merged.projects[0].name == "Distributed Cache"
+    assert len(merged.awards) == 1
+    assert merged.awards[0].name == "Hackathon Winner"
+    assert len(merged.languages) == 2
 
 
 def test_merge_arbitrary_skill_dictionaries():

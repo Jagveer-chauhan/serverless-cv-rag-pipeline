@@ -40,8 +40,10 @@ Strict JSON format rules:
   - skills: [{"category_name": str, "skills": [str], "proficiency_level": str}]
   - projects: [{"name": str, "description": str, "role": str, "technologies": [str], "link": str}]
   - certifications: [{"name": str, "issuer": str, "issue_date": str, "expiry_date": str, "credential_id": str, "link": str}]
-  - languages: [{"language": str, "proficiency": str}]
+  - publications: [{"title": str, "authors": str, "publisher": str, "date": str, "link": str, "description": str}]
   - awards: [{"title": str, "issuer": str, "date": str, "description": str}]
+  - languages: [{"language": str, "proficiency": str}]
+  - sections: [{"heading": str, "content": str}]
 
 Extract whatever fields are present in the text excerpt. If a field is not present in the excerpt, omit it or use an empty list."""
 
@@ -59,6 +61,13 @@ def clean_json_response(raw_text: str) -> str:
         if brace_match:
             text = brace_match.group(1).strip()
     return text
+
+
+def _clean_contact_label_prefixes(text: str) -> str:
+    """Removes common field label prefixes from extracted text lines."""
+    cleaned = re.sub(r"(?i)^(?:email|phone|tel|mobile|cell|location|address|city|linkedin|github|portfolio|website|links?)\s*[:|–—-]\s*", "", text).strip()
+    cleaned = re.sub(r"^[\s,|–—-]+|[\s,|–—-]+$", "", cleaned).strip()
+    return cleaned
 
 
 class LLMExtractor:
@@ -111,7 +120,7 @@ class LLMExtractor:
             )
             user_msg = (
                 f"[RESUME SECTION EXCERPT]:\n{chunk.content}\n\n"
-                f"Extract candidate info, work experience, education, skills, projects, certifications as JSON:"
+                f"Extract candidate info, work experience, education, skills, projects, certifications, publications, awards, languages as JSON:"
             )
 
             for attempt in range(max_retries + 1):
@@ -185,17 +194,29 @@ class LLMExtractor:
     def _heuristic_chunk_extraction(self, chunk: TextChunk) -> Dict[str, Any]:
         """Robust deterministic heuristic extraction for offline/fallback/zero-key modes."""
         content = chunk.content
-        section = chunk.section_name
+        section = chunk.section_name.upper()
         data: Dict[str, Any] = {}
 
         if section == "CONTACT_HEADER" or "CONTACT" in section:
+            # 1. Email matching
             email_match = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", content)
-            phone_match = re.search(r"(?:\+?\d{1,3}[\s-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}", content)
             
-            # Find links including github.com and linkedin.com without http prefix
+            # 2. International & local phone matching
+            phone_match = re.search(
+                r"(?:\+?\d{1,3}[\s-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}(?:[\s.-]?\d{1,4})?",
+                content
+            )
+            phone_str = None
+            if phone_match:
+                candidate_phone = phone_match.group(0).strip()
+                digit_count = sum(c.isdigit() for c in candidate_phone)
+                if digit_count >= 7 and not re.search(r"@|github|linkedin|http", candidate_phone, re.I):
+                    phone_str = candidate_phone
+
+            # 3. Links matching (ignore email domains)
             links = []
-            for m in re.finditer(r"https?://[^\s,;]+|(?:linkedin\.com/in/[^\s,;]+)|(?:github\.com/[^\s,;]+)", content, re.I):
-                url = m.group(0)
+            for m in re.finditer(r"(?<!@)\b(?:https?://[^\s,;)]+|(?:linkedin\.com/in/[^\s,;)]+)|(?:github\.com/[^\s,;)]+)|(?:[a-zA-Z0-9-]+\.(?:dev|me|app)[^\s,;)]*))", content, re.I):
+                url = m.group(0).rstrip(".,;|)")
                 if not url.startswith("http"):
                     url = f"https://{url}"
                 links.append(url)
@@ -216,9 +237,10 @@ class LLMExtractor:
                 l_no_contact = l
                 if email_match:
                     l_no_contact = l_no_contact.replace(email_match.group(0), "")
-                if phone_match:
-                    l_no_contact = l_no_contact.replace(phone_match.group(0), "")
-                l_no_contact = re.sub(r"https?://\S+|linkedin\.com/\S+|github\.com/\S+", "", l_no_contact).strip(" |,-")
+                if phone_str:
+                    l_no_contact = l_no_contact.replace(phone_str, "")
+                l_no_contact = re.sub(r"https?://\S+|linkedin\.com/\S+|github\.com/\S+", "", l_no_contact)
+                l_no_contact = _clean_contact_label_prefixes(l_no_contact)
                 if l_no_contact:
                     clean_first_lines.append(l_no_contact)
 
@@ -233,22 +255,33 @@ class LLMExtractor:
                     name = first_line
 
                 for l in clean_first_lines[1:]:
-                    if not title and not re.search(r"[@\d]|linkedin|github|http", l, re.I) and len(l) < 100:
-                        if "," in l and any(kw in l.lower() for kw in ["ca", "ny", "usa", "germany", "uk", "india", "gurugram", "faridabad", "delhi", "london", "berlin", "san francisco", "austin"]):
-                            location = l
+                    l_clean = _clean_contact_label_prefixes(l)
+                    if not l_clean:
+                        continue
+                    if not title and not re.search(r"[@\d]|linkedin|github|http", l_clean, re.I) and len(l_clean) < 100:
+                        if "," in l_clean and any(kw in l_clean.lower() for kw in ["ca", "ny", "usa", "germany", "uk", "india", "gurugram", "faridabad", "delhi", "london", "berlin", "san francisco", "austin", "singapore", "toronto"]):
+                            location = l_clean
                         else:
-                            title = l
-                    elif not location and ("," in l or any(kw in l.lower() for kw in ["ca", "ny", "usa", "germany", "uk", "india", "gurugram", "faridabad", "delhi", "london", "berlin", "san francisco", "remote"])):
-                        if not re.search(r"[@]|linkedin|github|http", l, re.I):
-                            location = l
+                            title = l_clean
+                    elif not location and ("," in l_clean or any(kw in l_clean.lower() for kw in ["ca", "ny", "usa", "germany", "uk", "india", "gurugram", "faridabad", "delhi", "london", "berlin", "san francisco", "remote", "singapore", "toronto"])):
+                        if not re.search(r"[@]|linkedin|github|http", l_clean, re.I):
+                            location = l_clean
+
+            if not location:
+                loc_m = re.search(r"(?i)(?:Location|Address|City)\s*[:|-]\s*([^\n|]+)", content)
+                if loc_m:
+                    location = _clean_contact_label_prefixes(loc_m.group(1))
+
+            if location:
+                location = _clean_contact_label_prefixes(location)
 
             data["candidate_info"] = {
                 "name": name,
                 "email": email_match.group(0) if email_match else None,
-                "phone": phone_match.group(0) if phone_match else None,
+                "phone": phone_str,
                 "location": location,
                 "title": title,
-                "links": list(set(links)),
+                "links": list(dict.fromkeys(links)),
             }
 
         elif section == "SUMMARY":
@@ -297,16 +330,14 @@ class LLMExtractor:
                     pipe_parts = [p.strip() for p in clean_line.split("|") if p.strip()]
                     if pipe_parts:
                         part0 = pipe_parts[0]
-                        # Check if part0 has em-dash / en-dash / ' - ' separator between Title and Company
                         dash_m = re.split(r"\s+[—–-]\s+", part0, maxsplit=1)
                         if len(dash_m) == 2:
                             p_a, p_b = dash_m[0].strip(), dash_m[1].strip()
-                            if any(kw in p_a.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "designer"]):
+                            if any(kw in p_a.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "designer", "director"]):
                                 title, company = p_a, p_b
                             else:
                                 company, title = p_a, p_b
                             
-                            # Remaining pipe parts are location or dedicated team
                             rem = pipe_parts[1:]
                             for r in rem:
                                 if any(kw in r.lower() for kw in ["team", "client", "dedicated"]):
@@ -315,14 +346,13 @@ class LLMExtractor:
                                     location = r
                         elif len(pipe_parts) >= 2:
                             p0, p1 = pipe_parts[0], pipe_parts[1]
-                            if any(kw in p1.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "designer"]):
+                            if any(kw in p1.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "designer", "director"]):
                                 company, title = p0, p1
-                            elif any(kw in p0.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "designer"]):
+                            elif any(kw in p0.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "designer", "director"]):
                                 title, company = p0, p1
                             else:
                                 company, title = p0, p1
 
-                            # If remaining parts exist
                             for r in pipe_parts[2:]:
                                 if any(kw in r.lower() for kw in ["team", "client", "dedicated"]):
                                     company = f"{company} ({r})"
@@ -335,7 +365,6 @@ class LLMExtractor:
                                     location = c_parts[-1]
                                     company = ", ".join(c_parts[:-1])
                         else:
-                            # Single part
                             if " at " in part0:
                                 parts = part0.split(" at ", 1)
                                 title, company = parts[0].strip(), parts[1].strip()
@@ -404,7 +433,6 @@ class LLMExtractor:
                     i += 1
                     continue
 
-                # Extract date range
                 d_match = date_regex.search(line)
                 start_date = None
                 end_date = None
@@ -418,7 +446,6 @@ class LLMExtractor:
                 institution = "University"
                 degree = None
 
-                # Check delimiter: ' — ' or ' – ' or ' | '
                 if " — " in clean_l:
                     parts = clean_l.split(" — ", 1)
                     degree, institution = parts[0].strip(), parts[1].strip()
@@ -559,7 +586,6 @@ class LLMExtractor:
                 if not l or len(l) < 4:
                     continue
                 
-                # Match name (issuer, date) or name (issuer)
                 m = re.search(r"\((.*?)(?:,\s*(\d{4}(?:-\d{2})?))?\)$", l)
                 if m:
                     c_name = l[:m.start()].strip(" -•*,: ")
@@ -569,5 +595,72 @@ class LLMExtractor:
                 else:
                     cert_items.append({"name": l})
             data["certifications"] = cert_items or [{"name": clean_content}]
+
+        elif section == "PUBLICATIONS":
+            clean_content = re.sub(r"^\[PUBLICATIONS(?:.*?)]\s*", "", content, flags=re.I).strip()
+            clean_content = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", clean_content, flags=re.I).strip()
+            clean_content = re.sub(r"(?i)^(?:publications\s*&\s*research|research\s*&\s*publications|publications|research\s+papers|research|patents)\s*\n+", "", clean_content).strip()
+            pub_items = []
+            for l in clean_content.splitlines():
+                l = re.sub(r"^[-•*–—\t]+\s*", "", l).strip()
+                if not l or len(l) < 4:
+                    continue
+                
+                link_m = re.search(r"https?://\S+", l)
+                link_val = link_m.group(0) if link_m else None
+                clean_title = re.sub(r"https?://\S+", "", l).strip(" ()-,|–—\t")
+                
+                date_m = re.search(r"\b(19\d\d|20\d\d)\b", clean_title)
+                date_val = date_m.group(1) if date_m else None
+                
+                pub_items.append({
+                    "title": clean_title,
+                    "date": date_val,
+                    "link": link_val,
+                    "description": l
+                })
+            data["publications"] = pub_items or [{"title": "Publications", "description": clean_content}]
+
+        elif section == "AWARDS":
+            clean_content = re.sub(r"^\[AWARDS(?:.*?)]\s*", "", content, flags=re.I).strip()
+            clean_content = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", clean_content, flags=re.I).strip()
+            clean_content = re.sub(r"(?i)^(?:awards\s*&\s*honors|awards\s*&\s*achievements|honors\s*&\s*awards|awards|honors|achievements)\s*\n+", "", clean_content).strip()
+            award_items = []
+            for l in clean_content.splitlines():
+                l = re.sub(r"^[-•*–—\t]+\s*", "", l).strip()
+                if not l or len(l) < 4:
+                    continue
+                date_m = re.search(r"\b(19\d\d|20\d\d)\b", l)
+                date_val = date_m.group(1) if date_m else None
+                award_items.append({"name": l, "date": date_val})
+            data["awards"] = award_items or [{"name": clean_content}]
+
+        elif section == "LANGUAGES":
+            clean_content = re.sub(r"^\[LANGUAGES(?:.*?)]\s*", "", content, flags=re.I).strip()
+            clean_content = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", clean_content, flags=re.I).strip()
+            clean_content = re.sub(r"(?i)^(?:languages\s+known|language\s+proficiencies|known\s+languages|languages)\s*\n+", "", clean_content).strip()
+            lang_items = []
+            for l in re.split(r"[,|\n;]+", clean_content):
+                l = re.sub(r"^[-•*–—\t]+\s*", "", l).strip()
+                if not l:
+                    continue
+                if "(" in l and ")" in l:
+                    m = re.search(r"^(.*?)\((.*?)\)", l)
+                    if m:
+                        lang_items.append({"language": m.group(1).strip(), "proficiency": m.group(2).strip()})
+                    else:
+                        lang_items.append({"language": l, "proficiency": "Proficient"})
+                elif ":" in l:
+                    parts = l.split(":", 1)
+                    lang_items.append({"language": parts[0].strip(), "proficiency": parts[1].strip()})
+                else:
+                    lang_items.append({"language": l, "proficiency": "Proficient"})
+            data["languages"] = lang_items or [{"language": clean_content, "proficiency": "Proficient"}]
+
+        else:
+            sec_heading = section.replace("_", " ").title()
+            clean_text = re.sub(r"^\[.*?]\s*", "", content).strip()
+            clean_text = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", clean_text, flags=re.I).strip()
+            data["sections"] = [{"heading": sec_heading, "content": clean_text}]
 
         return data

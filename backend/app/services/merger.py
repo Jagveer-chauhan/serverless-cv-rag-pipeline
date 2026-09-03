@@ -9,6 +9,10 @@ from backend.app.schemas.cv_schema import (
     EducationItem,
     SkillsBlock,
     CertificationItem,
+    ProjectItem,
+    AwardItem,
+    PublicationItem,
+    LanguageItem,
     DerivedInsights,
     InferredSignals,
     CustomSection,
@@ -30,8 +34,11 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
     merged_skills_inferred: List[str] = []
     merged_skills_soft: List[str] = []
     merged_certifications: List[Dict[str, Any]] = []
+    merged_projects: List[Dict[str, Any]] = []
+    merged_awards: List[Dict[str, Any]] = []
+    merged_publications: List[Dict[str, Any]] = []
+    merged_languages: List[Dict[str, Any]] = []
     merged_sections: List[Dict[str, str]] = []
-    merged_languages: List[str] = []
     merged_leadership: List[str] = []
 
     for extract in partial_extractions:
@@ -84,7 +91,7 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
                 merged_skills_inferred.extend(skills_data.get("inferred", []))
                 merged_skills_soft.extend(skills_data.get("soft_skills", []))
                 
-                # Dynamic/custom category keys (e.g. {"languages": [...], "databases": [...]})
+                # Dynamic/custom category keys
                 for cat_key, cat_val in skills_data.items():
                     if cat_key in ("explicit", "inferred", "soft_skills"):
                         continue
@@ -126,34 +133,86 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
                         "url": url_val
                     })
 
-        # 7. Projects & Custom Sections
-        proj_list = extract.get("projects") or extract.get("sections")
+        # 7. Projects
+        proj_list = extract.get("projects")
         if proj_list and isinstance(proj_list, list):
             for p in proj_list:
                 if isinstance(p, dict):
-                    heading = p.get("heading") or p.get("name") or "Projects"
-                    content = p.get("content") or p.get("description") or str(p)
+                    name = p.get("name") or p.get("title") or p.get("heading")
+                    if name:
+                        merged_projects.append({
+                            "name": name,
+                            "role": p.get("role"),
+                            "description": p.get("description") or p.get("content"),
+                            "technologies": p.get("technologies") or p.get("technologies_used") or [],
+                            "links": p.get("links") or ([p["link"]] if p.get("link") else [])
+                        })
+                elif isinstance(p, str) and len(p.strip()) > 3:
+                    merged_projects.append({"name": "Project", "description": p.strip()})
+
+        # 8. Publications & Patents
+        pub_list = extract.get("publications")
+        if pub_list and isinstance(pub_list, list):
+            for pub in pub_list:
+                if isinstance(pub, dict) and (pub.get("title") or pub.get("name") or pub.get("description")):
+                    merged_publications.append({
+                        "title": pub.get("title") or pub.get("name") or "Publication",
+                        "authors": pub.get("authors"),
+                        "publisher": pub.get("publisher") or pub.get("journal"),
+                        "date": pub.get("date") or pub.get("year"),
+                        "link": pub.get("link") or pub.get("url"),
+                        "description": pub.get("description")
+                    })
+                elif isinstance(pub, str) and len(pub.strip()) > 3:
+                    merged_publications.append({"title": pub.strip()})
+
+        # 9. Awards
+        award_list = extract.get("awards")
+        if award_list and isinstance(award_list, list):
+            for aw in award_list:
+                if isinstance(aw, dict) and (aw.get("title") or aw.get("name")):
+                    merged_awards.append({
+                        "name": aw.get("title") or aw.get("name") or "Award",
+                        "issuer": aw.get("issuer") or aw.get("organization"),
+                        "date": aw.get("date") or aw.get("year"),
+                        "description": aw.get("description")
+                    })
+                elif isinstance(aw, str) and len(aw.strip()) > 3:
+                    merged_awards.append({"name": aw.strip()})
+
+        # 10. Languages
+        lang_list = extract.get("languages")
+        if lang_list and isinstance(lang_list, list):
+            for l in lang_list:
+                if isinstance(l, dict) and (l.get("language") or l.get("name")):
+                    merged_languages.append({
+                        "language": l.get("language") or l.get("name"),
+                        "proficiency": l.get("proficiency") or l.get("level") or "Proficient"
+                    })
+                elif isinstance(l, str) and len(l.strip()) > 1:
+                    merged_languages.append({"language": l.strip(), "proficiency": "Proficient"})
+
+        # 11. Custom Sections
+        sec_list = extract.get("sections")
+        if sec_list and isinstance(sec_list, list):
+            for s in sec_list:
+                if isinstance(s, dict):
+                    heading = s.get("heading") or s.get("name") or "Section"
+                    content = s.get("content") or s.get("description") or str(s)
                     heading = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", heading, flags=re.I).strip()
                     content = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", content, flags=re.I).strip()
                     if heading:
                         merged_sections.append({"heading": heading, "content": content})
-                elif isinstance(p, str):
-                    clean_p = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", p, flags=re.I).strip()
-                    merged_sections.append({"heading": "Projects", "content": clean_p})
+                elif isinstance(s, str):
+                    clean_s = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", s, flags=re.I).strip()
+                    merged_sections.append({"heading": "Section", "content": clean_s})
 
-        # 8. Languages
-        lang_list = extract.get("languages")
-        if lang_list and isinstance(lang_list, list):
-            for l in lang_list:
-                if isinstance(l, dict) and l.get("language"):
-                    merged_languages.append(l["language"])
-                elif isinstance(l, str):
-                    merged_languages.append(l)
-
-        # 9. Derived / Inferred signals
+        # 12. Derived / Inferred signals
         derived_data = extract.get("derived")
         if derived_data and isinstance(derived_data, dict):
-            merged_languages.extend(derived_data.get("languages", []))
+            for dl in derived_data.get("languages", []):
+                if isinstance(dl, str):
+                    merged_languages.append({"language": dl, "proficiency": "Proficient"})
 
         inferred_data = extract.get("inferred")
         if inferred_data and isinstance(inferred_data, dict):
@@ -184,9 +243,20 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
     # Deduplicate Certifications
     deduped_certs = _deduplicate_by_name(merged_certifications, key="name", model_cls=CertificationItem)
 
+    # Deduplicate Projects
+    deduped_projects = _deduplicate_projects(merged_projects)
+
+    # Deduplicate Publications
+    deduped_pubs = _deduplicate_by_name(merged_publications, key="title", model_cls=PublicationItem)
+
+    # Deduplicate Awards
+    deduped_awards = _deduplicate_by_name(merged_awards, key="name", model_cls=AwardItem)
+
+    # Deduplicate Languages
+    deduped_langs = _deduplicate_by_name(merged_languages, key="language", model_cls=LanguageItem)
+
     # Calculate Derived insights
     approx_years = len(deduped_exp) * 2.5 if deduped_exp else 1.0
-    # Try to calculate more accurate years if dates exist
     year_numbers = []
     for exp in deduped_exp:
         if exp.start_date:
@@ -202,11 +272,12 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         approx_years = min(calc_years, 30.0)
 
     seniority = "Senior" if approx_years >= 5 else "Mid" if approx_years >= 2 else "Junior"
+    lang_names = sorted(list({l.language for l in deduped_langs})) or ["English"]
     derived_insights = DerivedInsights(
         years_of_experience=approx_years,
         seniority_level=seniority,
         domain="Technology / Engineering",
-        languages=sorted(list(set(merged_languages))) or ["English"]
+        languages=lang_names
     )
 
     inferred_signals = InferredSignals(
@@ -234,11 +305,39 @@ def merge_extracted_chunks(partial_extractions: List[Dict[str, Any]], raw_text: 
         education=deduped_edu,
         skills=skills_block,
         certifications=deduped_certs,
+        projects=deduped_projects,
+        publications=deduped_pubs,
+        awards=deduped_awards,
+        languages=deduped_langs,
         derived=derived_insights,
         inferred=inferred_signals,
         sections=deduped_sections,
         raw_text=raw_text,
     )
+
+
+def _deduplicate_projects(items: List[Dict[str, Any]]) -> List[ProjectItem]:
+    seen = {}
+    for it in items:
+        name = str(it.get("name", "")).strip()
+        name = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", name, flags=re.I).strip(" ,|–—-")
+        if not name or name.lower() in ("key projects", "selected projects", "projects"):
+            if not it.get("description") and not it.get("technologies"):
+                continue
+        key = name.lower()
+        if key not in seen:
+            it["name"] = name or "Project"
+            seen[key] = it
+        else:
+            existing = seen[key]
+            curr_tech = existing.get("technologies", [])
+            new_tech = it.get("technologies", [])
+            existing["technologies"] = list(dict.fromkeys(curr_tech + new_tech))
+            if it.get("description") and not existing.get("description"):
+                existing["description"] = it["description"]
+            elif it.get("description") and existing.get("description") and it["description"] not in existing["description"]:
+                existing["description"] = f"{existing['description']}\n{it['description']}"
+    return [ProjectItem.model_validate(val) for val in seen.values()]
 
 
 def _deduplicate_work_experience(items: List[Dict[str, Any]]) -> List[WorkExperienceItem]:

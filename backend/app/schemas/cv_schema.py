@@ -87,6 +87,35 @@ class CustomSection(DynamicBaseModel):
     content: str
 
 
+class ProjectItem(DynamicBaseModel):
+    name: str = Field(default="Project", alias="title")
+    role: Optional[str] = None
+    description: Optional[str] = None
+    technologies: List[str] = Field(default_factory=list, alias="technologies_used")
+    links: List[str] = Field(default_factory=list, alias="link")
+
+
+class AwardItem(DynamicBaseModel):
+    name: str = Field(default="Award", alias="title")
+    issuer: Optional[str] = Field(default=None, alias="organization")
+    date: Optional[str] = Field(default=None, alias="year")
+    description: Optional[str] = None
+
+
+class PublicationItem(DynamicBaseModel):
+    title: str = Field(default="Publication", alias="name")
+    authors: Optional[str] = None
+    publisher: Optional[str] = Field(default=None, alias="journal")
+    date: Optional[str] = Field(default=None, alias="year")
+    link: Optional[str] = Field(default=None, alias="url")
+    description: Optional[str] = None
+
+
+class LanguageItem(DynamicBaseModel):
+    language: str = Field(default="Language", alias="name")
+    proficiency: Optional[str] = Field(default=None, alias="level")
+
+
 class ChunkExtractionSchema(DynamicBaseModel):
     """Flexible chunk extraction schema allowing chunk-level partial extractions."""
     candidate: Optional[CandidateInfo] = Field(default=None, alias="candidate_info")
@@ -95,9 +124,10 @@ class ChunkExtractionSchema(DynamicBaseModel):
     education: List[EducationItem] = Field(default_factory=list)
     skills: Optional[Union[SkillsBlock, List[Any], Dict[str, Any]]] = None
     certifications: List[Union[CertificationItem, Dict[str, Any]]] = Field(default_factory=list)
-    projects: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
-    languages: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
-    awards: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
+    projects: List[Union[ProjectItem, Dict[str, Any], str]] = Field(default_factory=list)
+    awards: List[Union[AwardItem, Dict[str, Any], str]] = Field(default_factory=list)
+    publications: List[Union[PublicationItem, Dict[str, Any], str]] = Field(default_factory=list)
+    languages: List[Union[LanguageItem, Dict[str, Any], str]] = Field(default_factory=list)
     sections: List[Union[CustomSection, Dict[str, Any]]] = Field(default_factory=list)
 
 
@@ -118,6 +148,7 @@ class ProcessingMetadata(DynamicBaseModel):
     rag_ready_at: Optional[str] = None
     extraction_time_ms: Optional[float] = None
     chunks_used: int = 0
+    retry_count: int = 0
     # Cold-start tracking (required by spec §3.6)
     cold_start: bool = Field(default=False, alias="is_cold_start")
     cold_start_ms: Optional[float] = Field(default=None, alias="model_loading_time_ms")
@@ -143,8 +174,10 @@ class CVExtractionSchema(BaseModel):
     education: List[EducationItem] = Field(default_factory=list)
     skills: Optional[Union[SkillsBlock, List[Any], Dict[str, Any]]] = None
     certifications: List[CertificationItem] = Field(default_factory=list)
-    projects: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
-    awards: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
+    projects: List[Union[ProjectItem, Dict[str, Any]]] = Field(default_factory=list)
+    awards: List[Union[AwardItem, Dict[str, Any]]] = Field(default_factory=list)
+    publications: List[Union[PublicationItem, Dict[str, Any]]] = Field(default_factory=list)
+    languages: List[Union[LanguageItem, Dict[str, Any], str]] = Field(default_factory=list)
     derived: Optional[DerivedInsights] = None
     inferred: Optional[InferredSignals] = None
     sections: List[CustomSection] = Field(
@@ -165,7 +198,7 @@ def calculate_confidence_scores(schema: CVExtractionSchema) -> ConfidenceScores:
         1 if schema.experience else 0,
         1 if schema.education else 0,
         1 if schema.skills else 0,
-        1 if schema.certifications else 0,
+        1 if schema.certifications or schema.projects else 0,
         1 if schema.derived else 0,
         1 if schema.inferred else 0,
     ])
