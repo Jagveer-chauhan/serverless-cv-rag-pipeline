@@ -351,7 +351,7 @@ def _deduplicate_projects(items: List[Dict[str, Any]]) -> List[ProjectItem]:
     for it in items:
         name = str(it.get("name", "")).strip()
         name = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", name, flags=re.I).strip(" ,|–—-")
-        if not name or name.lower() in ("key projects", "selected projects", "projects", "project"):
+        if not name or name.lower() in ("key projects", "selected projects", "projects", "project", "__continuation__"):
             if seen and (it.get("description") or it.get("technologies")):
                 last_key = list(seen.keys())[-1]
                 last_proj = seen[last_key]
@@ -381,7 +381,7 @@ def _deduplicate_projects(items: List[Dict[str, Any]]) -> List[ProjectItem]:
 
 def _deduplicate_work_experience(items: List[Dict[str, Any]]) -> List[WorkExperienceItem]:
     seen = {}
-    invalid_titles = {"experience", "work experience", "professional experience", "employment", "career history", "work history"}
+    invalid_titles = {"experience", "work experience", "professional experience", "employment", "career history", "work history", "__continuation__"}
     for it in items:
         company = str(it.get("company", "")).strip()
         title = str(it.get("title", it.get("position", ""))).strip()
@@ -390,8 +390,8 @@ def _deduplicate_work_experience(items: List[Dict[str, Any]]) -> List[WorkExperi
         company = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", company, flags=re.I).strip(" ,|")
         title = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", title, flags=re.I).strip(" ,|")
 
-        is_generic_title = not title or title.lower() in invalid_titles or title.lower() in ("role", "professional")
-        is_generic_company = not company or company.lower() in ("company", "")
+        is_generic_title = not title or title.lower() in invalid_titles or title.lower() in ("role", "professional", "__continuation__")
+        is_generic_company = not company or company.lower() in ("company", "__continuation__", "")
 
         # If this is a continuation chunk from a multi-page split
         if is_generic_company or is_generic_title:

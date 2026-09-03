@@ -50,3 +50,8 @@ yarn-error.log*
 *.swo
 .DS_Store
 Thumbs.db
+
+# User sample resumes (do not commit)
+samples/Jagveer*
+samples/jagveer*
+

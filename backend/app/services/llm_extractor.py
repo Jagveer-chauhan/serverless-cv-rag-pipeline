@@ -308,49 +308,82 @@ class LLMExtractor:
                 "London", "Berlin", "San Francisco", "Austin", "New York", "Chicago", "Seattle"
             ]
 
+            def extract_loc_and_clean(s: str) -> Tuple[str, Optional[str]]:
+                loc = None
+                s = s.strip(" ()-,|–—\t")
+                parts = [p.strip() for p in re.split(r",(?![^()]*\))", s) if p.strip()]
+                if len(parts) >= 2:
+                    last = parts[-1]
+                    if any(c.lower() in last.lower() for c in known_cities) or (len(last) < 25 and not any(kw in last.lower() for kw in ["inc", "llc", "ltd", "corp", "team", "technologies"])):
+                        loc = last
+                        s = ", ".join(parts[:-1])
+                for c in known_cities:
+                    if s.endswith(c) and len(s) > len(c) + 3:
+                        if not loc:
+                            loc = c
+                        s = s[:-len(c)].rstrip(" ,|–—-")
+                        break
+                return s.strip(" ,|–—-"), loc
+
             def parse_job_title_company(raw_str: str) -> Tuple[str, str, Optional[str]]:
                 comp = "Company"
                 tit = "Role"
                 loc = None
                 raw_str = raw_str.strip(" ()-,|–—\t")
 
-                # Parse location outside parentheses
-                parts_no_paren = [p.strip() for p in re.split(r",(?![^()]*\))", raw_str) if p.strip()]
-                if len(parts_no_paren) >= 2 and (len(parts_no_paren[-1]) < 30 or any(c.lower() in parts_no_paren[-1].lower() for c in known_cities)):
-                    loc = parts_no_paren[-1]
-                    raw_str = ", ".join(parts_no_paren[:-1])
-
-                for c in known_cities:
-                    if raw_str.endswith(c) and len(raw_str) > len(c) + 3:
-                        if not loc:
-                            loc = c
-                        raw_str = raw_str[:-len(c)].rstrip(" ,|–—-")
-                        break
-
+                # 1. Pipe-separated: e.g. 'Company, Location | Title' or 'Title at Company | Location'
                 if " | " in raw_str or "|" in raw_str:
-                    parts = [p.strip() for p in raw_str.split("|") if p.strip()]
-                    p0, p1 = parts[0], parts[1] if len(parts) > 1 else ""
-                    if any(kw in p1.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant"]):
-                        comp, tit = p0, p1
-                    elif any(kw in p0.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant"]):
-                        tit, comp = p0, p1
+                    pipe_parts = [p.strip() for p in raw_str.split("|") if p.strip()]
+                    p0 = pipe_parts[0]
+                    p1 = pipe_parts[1] if len(pipe_parts) > 1 else ""
+                    p2 = pipe_parts[2] if len(pipe_parts) > 2 else ""
+
+                    p0_clean, loc0 = extract_loc_and_clean(p0)
+                    p1_clean, loc1 = extract_loc_and_clean(p1)
+                    loc = loc0 or loc1 or (p2 if len(p2) < 30 else None)
+
+                    # Check dash inside p0
+                    if " — " in p0_clean or " – " in p0_clean or " - " in p0_clean:
+                        dash_parts = re.split(r"\s+[—–-]\s+", p0_clean, maxsplit=1)
+                        dp0, dp1 = dash_parts[0].strip(), dash_parts[1].strip()
+                        if any(kw in dp0.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant"]):
+                            tit, comp = dp0, dp1
+                        else:
+                            comp, tit = dp0, dp1
+                    elif any(kw in p1_clean.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "full-stack", "backend", "frontend"]):
+                        comp, tit = p0_clean, p1_clean
+                    elif any(kw in p0_clean.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "full-stack", "backend", "frontend"]):
+                        tit, comp = p0_clean, p1_clean
                     else:
-                        comp, tit = p0, p1
+                        comp, tit = p0_clean, p1_clean
+
+                elif " — " in raw_str or " – " in raw_str:
+                    dash_parts = re.split(r"\s+[—–]\s+", raw_str, maxsplit=1)
+                    p0, p1 = dash_parts[0].strip(), dash_parts[1].strip()
+                    p0_clean, loc0 = extract_loc_and_clean(p0)
+                    p1_clean, loc1 = extract_loc_and_clean(p1)
+                    loc = loc0 or loc1
+                    if any(kw in p0_clean.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant"]):
+                        tit, comp = p0_clean, p1_clean
+                    else:
+                        comp, tit = p0_clean, p1_clean
+
                 elif " at " in raw_str:
                     parts = raw_str.split(" at ", 1)
-                    tit, comp = parts[0].strip(), parts[1].strip()
-                elif " — " in raw_str or " – " in raw_str or " - " in raw_str:
-                    parts = re.split(r"\s+[—–-]\s+", raw_str, maxsplit=1)
-                    p0, p1 = parts[0].strip(), parts[1].strip()
-                    if any(kw in p0.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant"]):
-                        tit, comp = p0, p1
-                    else:
-                        comp, tit = p0, p1
+                    tit = parts[0].strip()
+                    comp, loc = extract_loc_and_clean(parts[1].strip())
                 else:
-                    if any(kw in raw_str.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "intern"]):
-                        tit = raw_str
+                    raw_clean, loc = extract_loc_and_clean(raw_str)
+                    if any(kw in raw_clean.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant", "intern"]):
+                        tit = raw_clean
                     else:
-                        comp = raw_str
+                        comp = raw_clean
+
+                # Balance parentheses
+                if tit.count("(") > tit.count(")"):
+                    tit += ")"
+                if comp.count("(") > comp.count(")"):
+                    comp += ")"
 
                 return comp or "Company", tit or "Role", loc
 
@@ -386,75 +419,96 @@ class LLMExtractor:
             if curr_block["dates"] or curr_block["headers"]:
                 job_blocks.append(curr_block)
 
-            jobs = []
-            for b in job_blocks:
-                headers = b["headers"]
-                dates = b["dates"]
-                raw_lines = b["lines"]
-
-                company = "Company"
-                title = "Role"
-                location = None
-
-                if len(headers) == 1:
-                    company, title, location = parse_job_title_company(headers[0])
-                elif len(headers) >= 2:
-                    l0, l1 = headers[0], headers[1]
-                    c1, t1, loc1 = parse_job_title_company(l1)
-                    c0, t0, loc0 = parse_job_title_company(l0)
-                    if any(kw in l0.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant"]):
-                        title = l0
-                        company = c1 if c1 != "Company" else l1
-                        location = loc1
-                    elif any(kw in l1.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant"]):
-                        title = l1
-                        company = c0 if c0 != "Company" else l0
-                        location = loc0 or loc1
-                    else:
-                        title = l0
-                        company = l1
-                        location = loc1
-                elif not headers:
-                    company = "Company"
-                    title = "Role"
-
-                achievements = []
-                description_lines = []
-
-                for l in raw_lines:
-                    is_b = bool(re.match(r"^[-•*–—\t]\s*", l))
+            # Check if this entire chunk has NO date lines (continuation chunk)
+            if not any(b["dates"] for b in job_blocks) and not any(date_regex.search(l) for l in lines):
+                all_bullets = []
+                for l in lines:
                     clean_l = re.sub(r"^[-•*–—\t]+\s*", "", l).strip()
-                    if not clean_l:
-                        continue
-                    if is_b:
-                        achievements.append(clean_l)
-                    else:
-                        description_lines.append(clean_l)
-
-                desc_text = "\n".join(description_lines).strip()
-                ach_text = "\n".join(achievements).strip()
-                final_desc = desc_text if desc_text and desc_text != ach_text else None
-                if not achievements and description_lines:
-                    achievements = description_lines
-                    final_desc = None
-
-                jobs.append({
-                    "company": company or "Company",
-                    "position": title or "Role",
-                    "title": title or "Role",
-                    "location": location,
-                    "start_date": dates[0] if dates else None,
-                    "end_date": dates[1] if dates else None,
-                    "key_achievements": achievements,
-                    "achievements": achievements,
+                    if clean_l:
+                        all_bullets.append(clean_l)
+                data["work_experience"] = [{
+                    "company": "Company",
+                    "position": "Role",
+                    "title": "Role",
+                    "location": None,
+                    "start_date": None,
+                    "end_date": None,
+                    "key_achievements": all_bullets,
+                    "achievements": all_bullets,
                     "technologies": [],
                     "technologies_used": [],
-                    "description": final_desc
-                })
+                    "description": None
+                }]
+            else:
+                jobs = []
+                for b in job_blocks:
+                    headers = b["headers"]
+                    dates = b["dates"]
+                    raw_lines = b["lines"]
 
-            data["work_experience"] = jobs or [
-                {"company": "Company", "position": "Professional", "title": "Professional", "description": clean_content}
-            ]
+                    company = "Company"
+                    title = "Role"
+                    location = None
+
+                    if len(headers) == 1:
+                        company, title, location = parse_job_title_company(headers[0])
+                    elif len(headers) >= 2:
+                        l0, l1 = headers[0], headers[1]
+                        c1, t1, loc1 = parse_job_title_company(l1)
+                        c0, t0, loc0 = parse_job_title_company(l0)
+                        if any(kw in l0.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant"]):
+                            title = l0
+                            company = c1 if c1 != "Company" else l1
+                            location = loc1
+                        elif any(kw in l1.lower() for kw in ["developer", "engineer", "architect", "lead", "manager", "specialist", "analyst", "consultant"]):
+                            title = l1
+                            company = c0 if c0 != "Company" else l0
+                            location = loc0 or loc1
+                        else:
+                            title = l0
+                            company = l1
+                            location = loc1
+                    elif not headers:
+                        company = "Company"
+                        title = "Role"
+
+                    achievements = []
+                    description_lines = []
+
+                    for l in raw_lines:
+                        is_b = bool(re.match(r"^[-•*–—\t]\s*", l))
+                        clean_l = re.sub(r"^[-•*–—\t]+\s*", "", l).strip()
+                        if not clean_l:
+                            continue
+                        if is_b:
+                            achievements.append(clean_l)
+                        else:
+                            description_lines.append(clean_l)
+
+                    desc_text = "\n".join(description_lines).strip()
+                    ach_text = "\n".join(achievements).strip()
+                    final_desc = desc_text if desc_text and desc_text != ach_text else None
+                    if not achievements and description_lines:
+                        achievements = description_lines
+                        final_desc = None
+
+                    jobs.append({
+                        "company": company or "Company",
+                        "position": title or "Role",
+                        "title": title or "Role",
+                        "location": location,
+                        "start_date": dates[0] if dates else None,
+                        "end_date": dates[1] if dates else None,
+                        "key_achievements": achievements,
+                        "achievements": achievements,
+                        "technologies": [],
+                        "technologies_used": [],
+                        "description": final_desc
+                    })
+
+                data["work_experience"] = jobs or [
+                    {"company": "Company", "position": "Professional", "title": "Professional", "description": clean_content}
+                ]
 
         elif section == "EDUCATION":
             edu_items = []
@@ -641,11 +695,33 @@ class LLMExtractor:
             projects = []
             current_proj = None
 
+            labeled_subsections = (
+                "overview", "description", "student workflows", "certificate generation",
+                "architecture", "role-specific dashboards", "interactive features", "data processing",
+                "assessment workflows", "performance analytics", "security & compliance",
+                "stakeholder management", "database & architecture", "system optimization",
+                "security & access control", "state management", "security hardening",
+                "code modernization", "technical details", "features", "responsibilities", "key features"
+            )
+
             for line in lines:
                 is_bullet = bool(re.match(r"^[-•*–—\t]\s*", line))
                 has_pipe = " | " in line or "|" in line
                 has_dash_separator = bool(re.search(r"\s+[—–-]\s+", line))
-                is_proj_header = not is_bullet and (has_pipe or (has_dash_separator and len(line) < 120 and not line.endswith(".")) or len(line) < 60)
+                starts_lowercase = bool(re.match(r"^[a-z]", line))
+                is_sub_labeled = any(line.lower().startswith(f"{kw}:") for kw in labeled_subsections)
+
+                # A line is a new Project Header if it's not a bullet/subheading/dangling line
+                is_proj_header = False
+                if not is_bullet and not is_sub_labeled and not starts_lowercase:
+                    if has_pipe:
+                        is_proj_header = True
+                    elif has_dash_separator and len(line) < 120 and not line.endswith("."):
+                        is_proj_header = True
+                    elif len(line) < 60 and not line.endswith(".") and not line.endswith(",") and len(line.split()) <= 8:
+                        # Ensure not a sentence or fragment
+                        if not any(stop in line.lower() for stop in ["visitors", "servers", "platform", "implemented", "developed", "architected", "enhanced"]):
+                            is_proj_header = True
 
                 if is_proj_header:
                     if current_proj:
@@ -678,24 +754,35 @@ class LLMExtractor:
                         elif not role:
                             role = p
 
+                    name = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", name, flags=re.I).strip(" ,|–—-")
                     current_proj = {
-                        "name": name.strip(" ,|–—-"),
-                        "role": role.strip(" ,|–—-") if role else None,
+                        "name": name or "Project",
+                        "role": role,
+                        "description_lines": [],
                         "technologies": tech_stack,
                         "links": links,
-                        "description_lines": []
                     }
-                elif current_proj:
-                    clean_l = re.sub(r"^[-•*–—\t]+\s*", "", line)
-                    current_proj["description_lines"].append(clean_l)
+                else:
+                    clean_l = re.sub(r"^[-•*–—\t]+\s*", "", line).strip()
+                    if current_proj:
+                        current_proj["description_lines"].append(clean_l)
+                    else:
+                        # Top-of-chunk continuation from previous part
+                        current_proj = {
+                            "name": "__CONTINUATION__",
+                            "role": None,
+                            "description_lines": [clean_l],
+                            "technologies": [],
+                            "links": []
+                        }
 
             if current_proj:
                 projects.append(current_proj)
 
             for p in projects:
-                p["description"] = "\n".join(p.pop("description_lines", []))
+                p["description"] = "\n".join(p.pop("description_lines", [])).strip()
 
-            data["projects"] = projects or [{"name": "Key Projects", "description": clean_content}]
+            data["projects"] = projects or [{"name": "Project", "description": clean_content}]
 
         elif section == "CERTIFICATIONS":
             clean_content = re.sub(r"^\[CERTIFICATIONS(?:.*?)]\s*", "", content, flags=re.I).strip()
