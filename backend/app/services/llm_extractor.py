@@ -17,7 +17,7 @@ import re
 import time
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple, Union
 import httpx
 from pydantic import ValidationError
 
