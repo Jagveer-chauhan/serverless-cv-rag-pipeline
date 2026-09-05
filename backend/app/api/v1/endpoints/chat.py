@@ -27,7 +27,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     query: str = Field(..., description="Natural language question about the candidate/CV")
     document_id: Optional[str] = Field(None, description="Optional document ID filter for targeted querying")
-    top_k: int = Field(default=5, ge=1, le=10, description="Number of vector context chunks to retrieve (spec: k=5–10)")
+    top_k: int = Field(default=10, ge=1, le=20, description="Number of vector context chunks to retrieve")
     chat_history: Optional[List[ChatMessage]] = Field(default_factory=list, description="Prior conversation context")
 
 
@@ -96,17 +96,9 @@ def _extract_candidate_name_and_title(chunks: List[Dict[str, Any]]) -> Tuple[Opt
 def _build_greeting_response(chunks: List[Dict[str, Any]]) -> str:
     """Builds a warm, personalized greeting based on ingested candidate profile."""
     cand_name, cand_title = _extract_candidate_name_and_title(chunks)
-
     if cand_name and cand_name != "Candidate":
         title_str = f" ({cand_title})" if cand_title else ""
         return (
-            f"Hello! I'm your AI CV Intelligence Assistant. I'm currently analyzing the profile for **{cand_name}**{title_str}.\n\n"
-            f"Here are a few things you can ask me about this candidate:\n"
-            f"- **Core Technical Stack**: Languages, frameworks, databases, and tools\n"
-            f"- **Work Experience**: Previous companies, roles, and career accomplishments\n"
-            f"- **Projects & Architecture**: Major systems, applications, and portal architectures built\n"
-            f"- **Education & Certifications**: Academic qualifications and training\n\n"
-            f"What would you like to explore about **{cand_name}**?"
             f"Hello! I'm your AI CV Intelligence Assistant. I'm currently analysing the profile for **{cand_name}**{title_str}.\n\n"
             f"You can ask me about:\n"
             f"- **Skills & Tech Stack** — languages, frameworks, databases, tools\n"
@@ -123,25 +115,115 @@ def _build_greeting_response(chunks: List[Dict[str, Any]]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# LLM helpers
+# Intent classification & LLM helpers
 # ---------------------------------------------------------------------------
-def _build_user_message(query: str, context_text: str) -> str:
-    """Constructs the user turn sent to the LLM, injecting a brevity hint for factual queries."""
-    factual_signals = [
-        "how many year", "years of experience", "how long", "total experience",
-        "what skills", "which skills", "list of skills", "what languages",
-        "what technologies", "tech stack", "key skills", "core skills",
-        "how many companies", "number of", "how much experience",
+
+# Map intent name → (section names to boost, keyword signals in query)
+_INTENT_MAP = {
+    "experience": (
+        ["EXPERIENCE", "WORK", "EMPLOYMENT"],
+        [
+            "experience", "how many year", "years of experience", "how long", "total experience",
+            "how much experience", "work history", "career", "job", "company", "companies",
+            "role", "position", "employer", "employment", "worked", "work at", "work for",
+        ],
+    ),
+    "skills": (
+        ["SKILLS", "TECHNICAL", "TECHNOLOGIES", "STACK"],
+        [
+            "skill", "tech", "stack", "tool", "language", "framework", "library",
+            "what can", "what does", "what know", "proficien", "expertise", "competenc",
+            "python", "javascript", "react", "node", "php", "sql", "aws", "docker",
+        ],
+    ),
+    "projects": (
+        ["PROJECTS", "PROJECT", "PORTFOLIO"],
+        ["project", "built", "developed", "application", "platform", "system", "portfolio"],
+    ),
+    "education": (
+        ["EDUCATION", "CERTIFICATIONS", "TRAINING"],
+        ["education", "degree", "university", "college", "certif", "course", "academic"],
+    ),
+    "contact": (
+        ["CONTACT", "PERSONAL"],
+        ["email", "phone", "contact", "location", "linkedin", "github", "address"],
+    ),
+    "summary": (
+        ["SUMMARY", "PROFILE", "OBJECTIVE"],
+        ["who is", "summary", "overview", "about", "profile", "background", "tell me about"],
+    ),
+}
+
+# Factual queries that warrant a short, direct 1–2 sentence answer
+_FACTUAL_SIGNALS = [
+    "how many year", "years of experience", "how long", "total experience", "how much experience",
+    "what skills", "which skills", "list of skill", "list the skill", "what languages",
+    "what technologies", "tech stack", "key skills", "core skills",
+    "how many companies", "number of companies", "number of year",
+    "does he have", "does she have", "does the candidate",
+]
+
+
+def _classify_intent(query: str) -> Optional[str]:
+    """Returns the dominant intent of the query, or None for general queries."""
+    q = query.lower()
+    for intent, (_, signals) in _INTENT_MAP.items():
+        if any(sig in q for sig in signals):
+            return intent
+    return None
+
+
+def _boost_context(
+    query: str, all_chunks: List[Dict[str, Any]], top_k_chunks: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Prepends section-matched chunks to the context so the LLM always sees the right data.
+
+    For focused queries (experience, skills, …) we guarantee the relevant section
+    appears in the context even if vector similarity didn't rank it highly.
+    The total list is capped at top_k + 3 to avoid bloating the prompt.
+    """
+    intent = _classify_intent(query)
+    if not intent:
+        return top_k_chunks
+
+    target_sections, _ = _INTENT_MAP[intent]
+    # Pull section-matched chunks from the full chunk list (not just top-k)
+    section_chunks = [
+        c for c in all_chunks
+        if any(sec in (c.get("section_name") or "").upper() for sec in target_sections)
     ]
-    is_factual = any(sig in query.lower() for sig in factual_signals)
-    brevity_note = (
-        "IMPORTANT: Answer in ONE sentence or a short bullet list. Be direct — no padding.\n\n"
-        if is_factual else ""
-    )
+    if not section_chunks:
+        return top_k_chunks
+
+    # Merge: section chunks first, then remaining top-k, deduplicated by chunk_id
+    seen_ids = set()
+    merged: List[Dict[str, Any]] = []
+    for c in section_chunks[:4] + top_k_chunks:
+        cid = c.get("chunk_id")
+        if cid not in seen_ids:
+            seen_ids.add(cid)
+            merged.append(c)
+    return merged[:len(top_k_chunks) + 3]
+
+
+def _is_factual_query(query: str) -> bool:
+    q = query.lower()
+    return any(sig in q for sig in _FACTUAL_SIGNALS)
+
+
+def _build_user_message(query: str, context_text: str) -> str:
+    """Constructs the user turn sent to the LLM with intent-aware brevity enforcement."""
+    if _is_factual_query(query):
+        brevity = (
+            "STRICT RULE: Your entire answer must fit in ONE short sentence or a bullet list "
+            "of max 5 items. State only the direct fact — no intro, no explanation, no padding.\n\n"
+        )
+    else:
+        brevity = ""
     return (
         f"CV Excerpts:\n{context_text}\n\n"
         f"Question: {query}\n\n"
-        f"{brevity_note}"
+        f"{brevity}"
         f"Answer strictly from the excerpts above:"
     )
 
@@ -231,12 +313,18 @@ async def generate_rag_sse_stream(
     ]
     yield f"event: citations\ndata: {json.dumps({'citations': citations_data})}\n\n"
 
+    # ── Boost context: ensure section-relevant chunks are included ───────────
+    boosted_chunks = _boost_context(query, chunks, chunks)
+
     # ── Build context text and LLM message list ──────────────────────────────
     context_text = "\n\n".join(
         f"[EXCERPT {i+1} — {c['section_name']} (relevance {c['similarity']*100:.0f}%)]:\n{c['content']}"
-        for i, c in enumerate(chunks)
+        for i, c in enumerate(boosted_chunks)
     )
     user_msg = _build_user_message(query, context_text)
+
+    # ── Intent-aware token budget ─────────────────────────────────────────────
+    max_tokens = 120 if _is_factual_query(query) else 400
 
     base_messages: List[Dict[str, str]] = [
         {"role": "system", "content": RAG_SYSTEM_PROMPT},
@@ -252,7 +340,7 @@ async def generate_rag_sse_stream(
             stream = await hf_client.chat.completions.create(
                 model=model_name,
                 messages=base_messages,
-                max_tokens=400,
+                max_tokens=max_tokens,
                 temperature=0.1,
                 stream=True,
             )
@@ -269,9 +357,8 @@ async def generate_rag_sse_stream(
 
         except Exception as exc:
             logger.warning(f"HF streaming failed, attempting non-streaming fallback: {exc}")
-            # ── Non-streaming LLM fallback (same model, same prompt) ─────────
             try:
-                reply = await _call_llm_non_streaming(base_messages, model_name, api_key)
+                reply = await _call_llm_non_streaming(base_messages, model_name, api_key, max_tokens=max_tokens)
                 if not reply.strip():
                     raise ValueError("Non-streaming LLM returned empty reply")
                 for word in reply.split(" "):
