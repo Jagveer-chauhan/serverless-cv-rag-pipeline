@@ -37,10 +37,13 @@ Your goal is to answer the user's questions about the candidate accurately, natu
 Guidelines:
 1. Tone: Professional, direct, engaging, and objective.
 2. Focus: Answer the specific question asked directly and clearly. Do NOT repeat unrelated sections.
-3. Formatting: Use clean Markdown formatting with bullet points and bold key terms for high readability.
-4. Greetings: If the user says hello or greets you, reply warmly and offer help with the candidate's profile.
-5. Accuracy: Rely strictly on verified facts (companies, technologies, metrics, dates, and achievements) from the CV context.
-6. Missing Info: If a requested detail is not present in the CV, state clearly and politely that it is not mentioned."""
+3. Brevity: For factual questions (e.g. years of experience, list of skills, number of companies), give a SHORT, direct answer — 1-3 sentences or a tight bullet list. Do NOT add lengthy explanations or padding unless the user explicitly asks for details.
+4. Experience queries: If asked about years of experience (overall or in a specific skill/role), calculate from the dates in the CV and state it plainly, e.g. "5 years" or "3 years in Python (2021–2024)".
+5. Skills queries: If asked what skills the candidate has, return a concise comma-separated list or short bullet list — no lengthy narrative.
+6. Formatting: Use clean Markdown. Prefer inline answers over nested headers for short factual replies.
+7. Greetings: If the user says hello or greets you, reply warmly and offer help with the candidate's profile.
+8. Accuracy: Rely strictly on verified facts (companies, technologies, metrics, dates, and achievements) from the CV context.
+9. Missing Info: If a requested detail is not present in the CV, state clearly and politely that it is not mentioned."""
 
 
 GREETING_PATTERNS = [
@@ -175,10 +178,24 @@ async def generate_rag_sse_stream(
             for m in (chat_history or [])[-4:]:
                 messages.append({"role": m.role, "content": m.content})
 
+            # Detect if the question is a short factual query so we reinforce brevity
+            factual_keywords = [
+                "how many year", "years of experience", "how long", "total experience",
+                "what skills", "which skills", "list of skills", "what languages",
+                "what technologies", "tech stack", "key skills", "core skills",
+            ]
+            is_factual_query = any(kw in query.lower() for kw in factual_keywords)
+            brevity_instruction = (
+                "Keep your answer SHORT and direct — one sentence or a tight bullet list. "
+                "Do NOT add filler, lengthy context, or extra sections.\n\n"
+                if is_factual_query else ""
+            )
+
             user_msg = (
                 f"Candidate Resume Excerpts:\n{context_text}\n\n"
                 f"User Question: {query}\n\n"
-                f"Please provide a natural, accurate, and structured response addressing the user's question using the context above:"
+                f"{brevity_instruction}"
+                f"Answer using only the context above:"
             )
             messages.append({"role": "user", "content": user_msg})
 
@@ -218,6 +235,42 @@ async def generate_rag_sse_stream(
     yield f"event: done\ndata: {json.dumps({'status': 'complete', 'chunks_used': len(chunks)})}\n\n"
 
 
+def _compute_total_experience_years(chunks: List[Dict[str, Any]]) -> Optional[str]:
+    """Parses experience date ranges from CV chunks and returns a concise years-of-experience string."""
+    import datetime
+    date_range_re = re.compile(
+        r"(?i)(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*)?(\d{4})\s*(?:-|–|—|to)\s*(\d{4}|Present|Current|Now)",
+        re.IGNORECASE
+    )
+    current_year = datetime.datetime.now().year
+    exp_chunks = [c for c in chunks if c.get("section_name") == "EXPERIENCE"]
+    if not exp_chunks:
+        return None
+
+    total_months = 0
+    seen_ranges: List[tuple] = []
+    for ec in exp_chunks:
+        content = re.sub(r"^\[.*?\]\s*", "", ec.get("content", ""))
+        for m in date_range_re.finditer(content):
+            start_yr = int(m.group(1))
+            end_raw = m.group(2)
+            end_yr = current_year if end_raw.lower() in ("present", "current", "now") else int(end_raw)
+            if start_yr > end_yr or start_yr < 1980 or end_yr > current_year + 1:
+                continue
+            r = (start_yr, end_yr)
+            if r not in seen_ranges:
+                seen_ranges.append(r)
+                total_months += (end_yr - start_yr) * 12
+
+    if not seen_ranges:
+        return None
+
+    total_years = round(total_months / 12)
+    if total_years == 0:
+        return "less than 1 year"
+    return f"{total_years} year{'s' if total_years != 1 else ''}"
+
+
 def _generate_heuristic_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
     """Smart heuristic natural answer synthesis for offline/fallback/zero-key mode."""
     if not chunks:
@@ -230,6 +283,14 @@ def _generate_heuristic_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
     # 1. Greeting check
     if is_conversational_greeting(query):
         return _build_greeting_response(chunks)
+
+    # 1b. Years of experience / total experience queries — short direct answer
+    if any(k in q_lower for k in ["how many year", "years of experience", "how long", "total experience", "experience in year"]):
+        years_str = _compute_total_experience_years(chunks)
+        if years_str:
+            return f"{cand_prefix} has **{years_str}** of professional experience."
+        # fallback: try to pull dates from any chunk
+        return f"The exact duration of experience could not be calculated from the available CV data."
 
     # 2. Skills / Stack query
     if any(k in q_lower for k in ["skill", "technolog", "stack", "tool", "language", "framework", "python", "php", "react", "node", "sql", "proficien"]):
