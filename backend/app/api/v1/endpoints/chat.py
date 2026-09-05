@@ -107,47 +107,118 @@ def _build_greeting_response(chunks: List[Dict[str, Any]]) -> str:
             f"- **Projects & Architecture**: Major systems, applications, and portal architectures built\n"
             f"- **Education & Certifications**: Academic qualifications and training\n\n"
             f"What would you like to explore about **{cand_name}**?"
+            f"Hello! I'm your AI CV Intelligence Assistant. I'm currently analysing the profile for **{cand_name}**{title_str}.\n\n"
+            f"You can ask me about:\n"
+            f"- **Skills & Tech Stack** — languages, frameworks, databases, tools\n"
+            f"- **Work Experience** — companies, roles, years of experience\n"
+            f"- **Projects** — systems and applications built\n"
+            f"- **Education & Certifications**\n\n"
+            f"What would you like to know about **{cand_name}**?"
         )
-    else:
-        return (
-            "Hello! I'm your AI CV Intelligence Assistant. I can help you analyze candidate skills, "
-            "work experience, projects, and educational background with real-time citations.\n\n"
-            "How can I assist you with this candidate's resume today?"
-        )
+    return (
+        "Hello! I'm your AI CV Intelligence Assistant. I can answer questions about the "
+        "candidate's skills, experience, projects, and education.\n\n"
+        "How can I help you today?"
+    )
 
 
+# ---------------------------------------------------------------------------
+# LLM helpers
+# ---------------------------------------------------------------------------
+def _build_user_message(query: str, context_text: str) -> str:
+    """Constructs the user turn sent to the LLM, injecting a brevity hint for factual queries."""
+    factual_signals = [
+        "how many year", "years of experience", "how long", "total experience",
+        "what skills", "which skills", "list of skills", "what languages",
+        "what technologies", "tech stack", "key skills", "core skills",
+        "how many companies", "number of", "how much experience",
+    ]
+    is_factual = any(sig in query.lower() for sig in factual_signals)
+    brevity_note = (
+        "IMPORTANT: Answer in ONE sentence or a short bullet list. Be direct — no padding.\n\n"
+        if is_factual else ""
+    )
+    return (
+        f"CV Excerpts:\n{context_text}\n\n"
+        f"Question: {query}\n\n"
+        f"{brevity_note}"
+        f"Answer strictly from the excerpts above:"
+    )
+
+
+async def _call_llm_non_streaming(
+    messages: List[Dict[str, str]],
+    model_name: str,
+    api_key: str,
+    max_tokens: int = 300,
+) -> str:
+    """Calls the HF inference API without streaming and returns the full reply text."""
+    from huggingface_hub import AsyncInferenceClient
+    client = AsyncInferenceClient(api_key=api_key)
+    response = await client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=0.1,
+        stream=False,
+    )
+    return response.choices[0].message.content or ""
+
+
+def _raw_context_fallback(query: str, chunks: List[Dict[str, Any]]) -> str:
+    """Last-resort answer when no LLM key is available: surfaces the raw CV text."""
+    cand_name, _ = _extract_candidate_name_and_title(chunks)
+    prefix = f"**{cand_name}**" if cand_name else "The candidate"
+    lines = []
+    for c in chunks[:3]:
+        sec = c.get("section_name", "").title()
+        text = c.get("content", "").strip()
+        if text:
+            lines.append(f"**[{sec}]**\n{text}")
+    body = "\n\n".join(lines) if lines else "No relevant CV content found."
+    return (
+        f"*(LLM unavailable — showing raw CV excerpts for {prefix})*\n\n"
+        f"**Your question:** {query}\n\n"
+        f"{body}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main SSE generator
+# ---------------------------------------------------------------------------
 async def generate_rag_sse_stream(
     query: str,
     chunks: List[Dict[str, Any]],
     chat_history: List[ChatMessage],
     api_key: str = settings.HF_API_KEY,
-    model_name: str = settings.HF_MODEL_NAME
+    model_name: str = settings.HF_MODEL_NAME,
 ) -> AsyncGenerator[str, None]:
-    """Asynchronous generator yielding Server-Sent Events (SSE) with citations and streaming tokens."""
+    """Yields Server-Sent Events: citations → token stream → done."""
+
+    # ── No CV ingested yet ──────────────────────────────────────────────────
     if not chunks:
         yield f"event: citations\ndata: {json.dumps({'citations': []})}\n\n"
-        welcome_msg = (
+        msg = (
             "Welcome! No candidate CVs have been ingested yet. "
-            "Please click the **'Ingest New CV'** button on the left to upload a CV (e.g. from the `samples/` directory) "
-            "and start querying skills, experience, and match intelligence!"
+            "Please click **'Ingest New CV'** to upload a CV and start querying."
         )
-        for word in welcome_msg.split(" "):
+        for word in msg.split(" "):
             yield f"event: token\ndata: {json.dumps({'token': word + ' '})}\n\n"
             await asyncio.sleep(0.015)
         yield f"event: done\ndata: {json.dumps({'status': 'complete', 'chunks_used': 0})}\n\n"
         return
 
-    # If the user query is a simple greeting, reply naturally with conversational guidance (no citations needed)
+    # ── Greeting — answered locally, no LLM call needed ────────────────────
     if is_conversational_greeting(query):
         yield f"event: citations\ndata: {json.dumps({'citations': []})}\n\n"
-        greeting_text = _build_greeting_response(chunks)
-        for word in greeting_text.split(" "):
+        text = _build_greeting_response(chunks)
+        for word in text.split(" "):
             yield f"event: token\ndata: {json.dumps({'token': word + ' '})}\n\n"
             await asyncio.sleep(0.015)
         yield f"event: done\ndata: {json.dumps({'status': 'complete', 'chunks_used': 0})}\n\n"
         return
 
-    # 1. Filter and emit citations for relevant RAG chunks
+    # ── Emit citations ───────────────────────────────────────────────────────
     relevant_chunks = [c for c in chunks if c.get("similarity", 0) >= 0.05]
     citations_data = [
         {
@@ -160,328 +231,103 @@ async def generate_rag_sse_stream(
     ]
     yield f"event: citations\ndata: {json.dumps({'citations': citations_data})}\n\n"
 
-    # 2. Formulate RAG context
+    # ── Build context text and LLM message list ──────────────────────────────
     context_text = "\n\n".join(
-        f"[EXCERPT {i+1} - {c['section_name']} (Relevance: {c['similarity']*100:.1f}%)]:\n{c['content']}"
+        f"[EXCERPT {i+1} — {c['section_name']} (relevance {c['similarity']*100:.0f}%)]:\n{c['content']}"
         for i, c in enumerate(chunks)
     )
+    user_msg = _build_user_message(query, context_text)
 
-    # If HF API key is available, call HF AsyncInferenceClient streaming
+    base_messages: List[Dict[str, str]] = [
+        {"role": "system", "content": RAG_SYSTEM_PROMPT},
+        *[{"role": m.role, "content": m.content} for m in (chat_history or [])[-4:]],
+        {"role": "user", "content": user_msg},
+    ]
+
+    # ── Try streaming LLM response ───────────────────────────────────────────
     if api_key:
         try:
             from huggingface_hub import AsyncInferenceClient
             hf_client = AsyncInferenceClient(api_key=api_key)
-
-            messages = [
-                {"role": "system", "content": RAG_SYSTEM_PROMPT},
-            ]
-            for m in (chat_history or [])[-4:]:
-                messages.append({"role": m.role, "content": m.content})
-
-            # Detect if the question is a short factual query so we reinforce brevity
-            factual_keywords = [
-                "how many year", "years of experience", "how long", "total experience",
-                "what skills", "which skills", "list of skills", "what languages",
-                "what technologies", "tech stack", "key skills", "core skills",
-            ]
-            is_factual_query = any(kw in query.lower() for kw in factual_keywords)
-            brevity_instruction = (
-                "Keep your answer SHORT and direct — one sentence or a tight bullet list. "
-                "Do NOT add filler, lengthy context, or extra sections.\n\n"
-                if is_factual_query else ""
-            )
-
-            user_msg = (
-                f"Candidate Resume Excerpts:\n{context_text}\n\n"
-                f"User Question: {query}\n\n"
-                f"{brevity_instruction}"
-                f"Answer using only the context above:"
-            )
-            messages.append({"role": "user", "content": user_msg})
-
             stream = await hf_client.chat.completions.create(
                 model=model_name,
-                messages=messages,
-                max_tokens=750,
-                temperature=0.2,
-                stream=True
+                messages=base_messages,
+                max_tokens=400,
+                temperature=0.1,
+                stream=True,
             )
-
             token_emitted = False
             async for chunk_resp in stream:
-                if chunk_resp.choices and len(chunk_resp.choices) > 0:
+                if chunk_resp.choices:
                     delta = chunk_resp.choices[0].delta
                     if delta and delta.content:
                         token_emitted = True
                         yield f"event: token\ndata: {json.dumps({'token': delta.content})}\n\n"
 
             if not token_emitted:
-                raise ValueError("HF streaming returned empty token stream")
+                raise ValueError("HF streaming returned an empty token stream")
 
-        except Exception as e:
-            logger.warning(f"HF AsyncInferenceClient streaming failed, using fallback: {e}")
-            fallback_reply = _generate_heuristic_answer(query, chunks)
-            for word in fallback_reply.split(" "):
-                yield f"event: token\ndata: {json.dumps({'token': word + ' '})}\n\n"
-                await asyncio.sleep(0.015)
+        except Exception as exc:
+            logger.warning(f"HF streaming failed, attempting non-streaming fallback: {exc}")
+            # ── Non-streaming LLM fallback (same model, same prompt) ─────────
+            try:
+                reply = await _call_llm_non_streaming(base_messages, model_name, api_key)
+                if not reply.strip():
+                    raise ValueError("Non-streaming LLM returned empty reply")
+                for word in reply.split(" "):
+                    yield f"event: token\ndata: {json.dumps({'token': word + ' '})}\n\n"
+                    await asyncio.sleep(0.01)
+            except Exception as exc2:
+                logger.error(f"Non-streaming LLM fallback also failed: {exc2}")
+                reply = _raw_context_fallback(query, chunks)
+                for word in reply.split(" "):
+                    yield f"event: token\ndata: {json.dumps({'token': word + ' '})}\n\n"
+                    await asyncio.sleep(0.01)
     else:
-        # Fast local heuristic synthesis for tests & zero-key offline mode
-        fallback_reply = _generate_heuristic_answer(query, chunks)
-        for word in fallback_reply.split(" "):
+        # ── No API key — surface raw context with a clear note ───────────────
+        logger.warning("No HF API key configured — serving raw context fallback")
+        reply = _raw_context_fallback(query, chunks)
+        for word in reply.split(" "):
             yield f"event: token\ndata: {json.dumps({'token': word + ' '})}\n\n"
             await asyncio.sleep(0.015)
 
-    # 3. Emit completion event
     yield f"event: done\ndata: {json.dumps({'status': 'complete', 'chunks_used': len(chunks)})}\n\n"
 
 
-def _compute_total_experience_years(chunks: List[Dict[str, Any]]) -> Optional[str]:
-    """Parses experience date ranges from CV chunks and returns a concise years-of-experience string."""
-    import datetime
-    date_range_re = re.compile(
-        r"(?i)(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*)?(\d{4})\s*(?:-|–|—|to)\s*(\d{4}|Present|Current|Now)",
-        re.IGNORECASE
-    )
-    current_year = datetime.datetime.now().year
-    exp_chunks = [c for c in chunks if c.get("section_name") == "EXPERIENCE"]
-    if not exp_chunks:
-        return None
-
-    total_months = 0
-    seen_ranges: List[tuple] = []
-    for ec in exp_chunks:
-        content = re.sub(r"^\[.*?\]\s*", "", ec.get("content", ""))
-        for m in date_range_re.finditer(content):
-            start_yr = int(m.group(1))
-            end_raw = m.group(2)
-            end_yr = current_year if end_raw.lower() in ("present", "current", "now") else int(end_raw)
-            if start_yr > end_yr or start_yr < 1980 or end_yr > current_year + 1:
-                continue
-            r = (start_yr, end_yr)
-            if r not in seen_ranges:
-                seen_ranges.append(r)
-                total_months += (end_yr - start_yr) * 12
-
-    if not seen_ranges:
-        return None
-
-    total_years = round(total_months / 12)
-    if total_years == 0:
-        return "less than 1 year"
-    return f"{total_years} year{'s' if total_years != 1 else ''}"
-
-
-def _generate_heuristic_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
-    """Smart heuristic natural answer synthesis for offline/fallback/zero-key mode."""
-    if not chunks:
-        return "I could not find any relevant information in the uploaded CV documents regarding your question."
-
-    q_lower = query.lower()
-    cand_name, cand_title = _extract_candidate_name_and_title(chunks)
-    cand_prefix = f"**{cand_name}**" if cand_name else "The candidate"
-
-    # 1. Greeting check
-    if is_conversational_greeting(query):
-        return _build_greeting_response(chunks)
-
-    # 1b. Years of experience / total experience queries — short direct answer
-    if any(k in q_lower for k in ["how many year", "years of experience", "how long", "total experience", "experience in year"]):
-        years_str = _compute_total_experience_years(chunks)
-        if years_str:
-            return f"{cand_prefix} has **{years_str}** of professional experience."
-        # fallback: try to pull dates from any chunk
-        return f"The exact duration of experience could not be calculated from the available CV data."
-
-    # 2. Skills / Stack query
-    if any(k in q_lower for k in ["skill", "technolog", "stack", "tool", "language", "framework", "python", "php", "react", "node", "sql", "proficien"]):
-        skill_chunks = [c for c in chunks if c.get("section_name") == "SKILLS"]
-        lines = []
-        if skill_chunks:
-            for sc in skill_chunks:
-                clean = re.sub(r"^\[.*?\]\s*", "", sc.get("content", "")).strip()
-                for l in clean.splitlines():
-                    l_str = l.strip(" -•*")
-                    if l_str and not l_str.upper() == "SKILLS":
-                        lines.append(f"- **{l_str}**" if ":" in l_str else f"- {l_str}")
-        if lines:
-            return (
-                f"{cand_prefix} possesses the following core technical skills and proficiencies:\n\n"
-                + "\n".join(lines)
-            )
-
-    # 3. Projects query
-    if any(k in q_lower for k in ["project", "built", "cbfc", "erp", "lms", "portfolio", "platform", "system", "app", "developed"]):
-        proj_chunks = [c for c in chunks if c.get("section_name") == "PROJECTS"]
-        if proj_chunks:
-            proj_blocks = []
-            curr_proj = None
-            for pc in proj_chunks:
-                clean = re.sub(r"^\[.*?\]\s*", "", pc.get("content", "")).strip()
-                clean = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", clean).strip()
-                for line in clean.splitlines():
-                    line_s = line.strip()
-                    if not line_s or line_s.startswith("__CONTINUATION__"):
-                        continue
-                    is_header = ("|" in line_s or " – " in line_s or " — " in line_s) and not line_s.startswith(("-", "•", "*")) and not ":" in line_s.split("|")[0]
-                    if is_header:
-                        if curr_proj:
-                            proj_blocks.append(curr_proj)
-                        curr_proj = {"title": line_s.strip(" -•*"), "lines": []}
-                    elif curr_proj:
-                        curr_proj["lines"].append(line_s.strip(" -•*"))
-                    else:
-                        curr_proj = {"title": "Key Project", "lines": [line_s.strip(" -•*")]}
-            if curr_proj:
-                proj_blocks.append(curr_proj)
-
-            if proj_blocks:
-                formatted = []
-                for p in proj_blocks:
-                    b_str = "\n".join(f"- {l}" for l in p["lines"] if l)
-                    formatted.append(f"### {p['title']}\n{b_str}")
-                return (
-                    f"Here are the notable projects developed by {cand_prefix}:\n\n"
-                    + "\n\n".join(formatted)
-                )
-
-    # 4. Work Experience query
-    if any(k in q_lower for k in ["experience", "work", "job", "career", "company", "companies", "role", "responsibilit", "history", "mazars", "bitstreaks", "onetick"]):
-        exp_chunks = [c for c in chunks if c.get("section_name") == "EXPERIENCE"]
-        if exp_chunks:
-            job_blocks = []
-            curr_job = None
-            date_regex = re.compile(r"(?i)\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|[0-9]{1,2}/)?\s*\d{4}\s*(?:-|–|—|to)\s*(?:\d{4}|Present|Current|Now)\b")
-
-            for ec in exp_chunks:
-                clean = re.sub(r"^\[.*?\]\s*", "", ec.get("content", "")).strip()
-                clean = re.sub(r"\(Part\s+\d+/\d+\)\s*", "", clean).strip()
-                for line in clean.splitlines():
-                    line_s = line.strip()
-                    if not line_s or line_s.startswith("__CONTINUATION__"):
-                        continue
-                    is_job_header = (date_regex.search(line_s) or "|" in line_s) and not line_s.startswith(("-", "•", "*"))
-                    if is_job_header and (len(line_s) < 120):
-                        if curr_job:
-                            job_blocks.append(curr_job)
-                        curr_job = {"title": line_s.strip(" -•*"), "lines": []}
-                    elif curr_job:
-                        curr_job["lines"].append(line_s.strip(" -•*"))
-                    else:
-                        curr_job = {"title": "Work Experience", "lines": [line_s.strip(" -•*")]}
-            if curr_job:
-                job_blocks.append(curr_job)
-
-            if job_blocks:
-                formatted = []
-                for j in job_blocks:
-                    b_str = "\n".join(f"- {l}" for l in j["lines"] if l)
-                    formatted.append(f"### {j['title']}\n{b_str}")
-                return (
-                    f"Here is the professional work experience for {cand_prefix}:\n\n"
-                    + "\n\n".join(formatted)
-                )
-
-    # 5. Education / Certification query
-    if any(k in q_lower for k in ["education", "degree", "college", "university", "school", "certif", "course", "training", "academic"]):
-        edu_chunks = [c for c in chunks if c.get("section_name") in ("EDUCATION", "CERTIFICATIONS")]
-        if edu_chunks:
-            items = []
-            for ec in edu_chunks:
-                sec_title = ec.get("section_name", "").title()
-                clean = re.sub(r"^\[.*?\]\s*", "", ec.get("content", "")).strip()
-                sec_items = [f"- {l.strip(' -•*')}" for l in clean.splitlines() if l.strip()]
-                if sec_items:
-                    items.append(f"**{sec_title}:**\n" + "\n".join(sec_items))
-            if items:
-                return (
-                    f"Here is the educational background and certifications for {cand_prefix}:\n\n"
-                    + "\n\n".join(items)
-                )
-
-    # 6. Contact & Links query
-    if any(k in q_lower for k in ["contact", "email", "phone", "location", "linkedin", "github", "address", "reach", "call"]):
-        contact_chunks = [c for c in chunks if "CONTACT" in c.get("section_name", "")]
-        if contact_chunks:
-            clean = re.sub(r"^\[.*?\]\s*", "", contact_chunks[0].get("content", "")).strip()
-            return f"**Contact Information for {cand_prefix}:**\n\n{clean}"
-
-    # 7. Summary / Overview query
-    if any(k in q_lower for k in ["who is", "summary", "overview", "about", "profile", "background"]):
-        summ_chunks = [c for c in chunks if c.get("section_name") == "SUMMARY"]
-        if summ_chunks:
-            clean = re.sub(r"^\[.*?\]\s*", "", summ_chunks[0].get("content", "")).strip()
-            return f"**Professional Summary of {cand_prefix}**:\n\n{clean}"
-
-    # 8. General Semantic Synthesis across top matching chunks
-    matched_points = []
-    query_tokens = set(re.findall(r"\w{3,}", q_lower))
-
-    for c in chunks[:3]:
-        sec = c.get("section_name", "General").replace("_", " ").title()
-        raw_text = c.get("content", "").strip()
-        clean_text = re.sub(r"^\[.*?\]\s*", "", raw_text)
-        
-        for line in clean_text.splitlines():
-            line_str = line.strip(" -•*")
-            if not line_str or line_str.upper() == sec.upper() or len(line_str) < 15:
-                continue
-            line_tokens = set(re.findall(r"\w{3,}", line_str.lower()))
-            overlap = len(query_tokens & line_tokens)
-            if overlap > 0:
-                matched_points.append(f"- **[{sec}]**: {line_str}")
-
-    if matched_points:
-        # Deduplicate and return top matching points
-        deduped = list(dict.fromkeys(matched_points))[:8]
-        return (
-            f"Based on {cand_prefix}'s CV, here are the key details regarding **\"{query}\"**:\n\n"
-            + "\n".join(deduped)
-        )
-
-    # Fallback when no direct keyword overlap found
-    first_chunk = chunks[0]
-    sec = first_chunk.get("section_name", "General").replace("_", " ").title()
-    clean = re.sub(r"^\[.*?\]\s*", "", first_chunk.get("content", "")).strip()
-    preview = "\n".join([f"- {l.strip(' -•*')}" for l in clean.splitlines()[:5] if l.strip()])
-    return (
-        f"Regarding **\"{query}\"**, the most relevant section found in {cand_prefix}'s CV is **{sec}**:\n\n"
-        f"{preview}"
-    )
-
-
+# ---------------------------------------------------------------------------
+# Route
+# ---------------------------------------------------------------------------
 @router.post(
     "",
     summary="RAG Chat SSE Stream",
-    description="Query uploaded CVs with Server-Sent Events (SSE) streaming and chunk citations."
+    description="Query uploaded CVs with Server-Sent Events (SSE) streaming and chunk citations.",
 )
 async def chat_sse(
     request: ChatRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     if not request.query.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Query string cannot be empty."
+            detail="Query string cannot be empty.",
         )
 
     try:
-        # 1. Retrieve top-k relevant chunks via vector similarity
         chunks = await search_similar_chunks(
             db=db,
             query_text=request.query,
             document_id=request.document_id,
-            top_k=request.top_k
+            top_k=request.top_k,
         )
     except Exception as e:
         logger.warning(f"Vector search exception in chat: {e}")
         chunks = []
 
-    # 2. Return SSE StreamingResponse
     return StreamingResponse(
         generate_rag_sse_stream(
             query=request.query,
             chunks=chunks,
-            chat_history=request.chat_history or []
+            chat_history=request.chat_history or [],
         ),
         media_type="text/event-stream",
         headers={
@@ -489,5 +335,5 @@ async def chat_sse(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
             "Access-Control-Allow-Origin": "*",
-        }
+        },
     )
